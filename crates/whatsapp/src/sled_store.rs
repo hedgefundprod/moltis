@@ -652,13 +652,10 @@ mod tests {
             };
             store.set_sync_key(b"persist-key", key).await.unwrap();
             store
-                .set_version(
-                    "regular_high",
-                    HashState {
-                        version: 9,
-                        ..Default::default()
-                    },
-                )
+                .set_version("regular_high", HashState {
+                    version: 9,
+                    ..Default::default()
+                })
                 .await
                 .unwrap();
         }

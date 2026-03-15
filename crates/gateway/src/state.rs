@@ -778,14 +778,13 @@ impl GatewayState {
                     "client not connected",
                 ));
             }
-            inner.pending_client_requests.insert(
-                request_id.clone(),
-                PendingClientRequest {
+            inner
+                .pending_client_requests
+                .insert(request_id.clone(), PendingClientRequest {
                     method: method.into(),
                     sender: tx,
                     created_at: Instant::now(),
-                },
-            );
+                });
             let sent = inner
                 .clients
                 .get(conn_id)

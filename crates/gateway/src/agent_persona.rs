@@ -555,15 +555,12 @@ mod tests {
             .unwrap();
 
         let updated = store
-            .update(
-                "writer",
-                UpdateAgentParams {
-                    name: Some("Creative Writer".to_string()),
-                    emoji: Some("✍️".to_string()),
-                    theme: None,
-                    description: None,
-                },
-            )
+            .update("writer", UpdateAgentParams {
+                name: Some("Creative Writer".to_string()),
+                emoji: Some("✍️".to_string()),
+                theme: None,
+                description: None,
+            })
             .await
             .unwrap();
 
@@ -576,15 +573,12 @@ mod tests {
         let pool = test_pool().await;
         let store = AgentPersonaStore::new(pool);
         let result = store
-            .update(
-                "main",
-                UpdateAgentParams {
-                    name: Some("Changed".to_string()),
-                    emoji: None,
-                    theme: None,
-                    description: None,
-                },
-            )
+            .update("main", UpdateAgentParams {
+                name: Some("Changed".to_string()),
+                emoji: None,
+                theme: None,
+                description: None,
+            })
             .await;
         assert!(result.is_err());
     }

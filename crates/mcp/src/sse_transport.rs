@@ -616,13 +616,10 @@ mod tests {
             .create_async()
             .await;
 
-        let remote = remote_with_headers(
-            &server.url(),
-            &[
-                ("x-api-key", "secret-header"),
-                ("authorization", "ApiKey raw-secret"),
-            ],
-        );
+        let remote = remote_with_headers(&server.url(), &[
+            ("x-api-key", "secret-header"),
+            ("authorization", "ApiKey raw-secret"),
+        ]);
         let transport = SseTransport::new_with_remote(remote).unwrap();
         let resp = transport.request("test", None).await.unwrap();
         assert!(resp.result.is_some());
@@ -732,13 +729,10 @@ mod tests {
             .create_async()
             .await;
 
-        let remote = remote_with_headers(
-            &server.url(),
-            &[
-                ("x-api-key", "secret-header"),
-                ("authorization", "ApiKey raw-secret"),
-            ],
-        );
+        let remote = remote_with_headers(&server.url(), &[
+            ("x-api-key", "secret-header"),
+            ("authorization", "ApiKey raw-secret"),
+        ]);
         let auth: SharedAuthProvider = Arc::new(FixedTokenProvider);
         let transport = SseTransport::with_auth_remote(remote, auth).unwrap();
         let resp = transport.request("test", None).await.unwrap();

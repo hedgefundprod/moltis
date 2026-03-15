@@ -69,18 +69,15 @@ pub async fn register_events_api_account(
 
     {
         let mut accts = accounts.write().unwrap_or_else(|e| e.into_inner());
-        accts.insert(
-            account_id.to_string(),
-            AccountState {
-                account_id: account_id.to_string(),
-                config,
-                message_log,
-                event_sink,
-                cancel,
-                bot_user_id: Some(bot_user_id),
-                pending_threads: std::collections::HashMap::new(),
-            },
-        );
+        accts.insert(account_id.to_string(), AccountState {
+            account_id: account_id.to_string(),
+            config,
+            message_log,
+            event_sink,
+            cancel,
+            bot_user_id: Some(bot_user_id),
+            pending_threads: std::collections::HashMap::new(),
+        });
     }
 
     Ok(())

@@ -841,16 +841,13 @@ mod tests {
             ("BRAVE_API_KEY".to_string(), "config-brave".to_string()),
         ]);
 
-        let merged = merge_env_overrides(
-            &base,
-            vec![
-                ("OPENAI_API_KEY".to_string(), "ui-openai".to_string()),
-                (
-                    "PERPLEXITY_API_KEY".to_string(),
-                    "ui-perplexity".to_string(),
-                ),
-            ],
-        );
+        let merged = merge_env_overrides(&base, vec![
+            ("OPENAI_API_KEY".to_string(), "ui-openai".to_string()),
+            (
+                "PERPLEXITY_API_KEY".to_string(),
+                "ui-perplexity".to_string(),
+            ),
+        ]);
 
         assert_eq!(
             merged.get("OPENAI_API_KEY").map(String::as_str),

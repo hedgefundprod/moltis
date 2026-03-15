@@ -1345,24 +1345,21 @@ mod tests {
 
         {
             let mut map = accounts.write().expect("accounts write lock");
-            map.insert(
-                account_id.to_string(),
-                AccountState {
-                    bot: bot.clone(),
-                    bot_username: Some("test_bot".to_string()),
-                    account_id: account_id.to_string(),
-                    config: TelegramAccountConfig {
-                        token: Secret::new("test-token".to_string()),
-                        dm_policy: DmPolicy::Open,
-                        ..Default::default()
-                    },
-                    outbound: Arc::clone(&outbound),
-                    cancel: CancellationToken::new(),
-                    message_log: None,
-                    event_sink: None,
-                    otp: Mutex::new(OtpState::new(300)),
+            map.insert(account_id.to_string(), AccountState {
+                bot: bot.clone(),
+                bot_username: Some("test_bot".to_string()),
+                account_id: account_id.to_string(),
+                config: TelegramAccountConfig {
+                    token: Secret::new("test-token".to_string()),
+                    dm_policy: DmPolicy::Open,
+                    ..Default::default()
                 },
-            );
+                outbound: Arc::clone(&outbound),
+                cancel: CancellationToken::new(),
+                message_log: None,
+                event_sink: None,
+                otp: Mutex::new(OtpState::new(300)),
+            });
         }
 
         outbound

@@ -575,13 +575,10 @@ mod tests {
     #[tokio::test]
     async fn test_status_shows_stopped_for_configured_but_not_started() {
         let mut reg = McpRegistry::new();
-        reg.servers.insert(
-            "test".into(),
-            McpServerConfig {
-                command: "echo".into(),
-                ..Default::default()
-            },
-        );
+        reg.servers.insert("test".into(), McpServerConfig {
+            command: "echo".into(),
+            ..Default::default()
+        });
         let mgr = McpManager::new(reg);
 
         let statuses = mgr.status_all().await;
@@ -594,21 +591,18 @@ mod tests {
     #[tokio::test]
     async fn test_status_sanitizes_remote_url_and_hides_remote_env_values() {
         let mut reg = McpRegistry::new();
-        reg.servers.insert(
-            "remote".into(),
-            McpServerConfig {
-                transport: TransportType::Sse,
-                url: Some(secrecy::Secret::new(
-                    "https://mcp.example.com/mcp?token=secret-value".to_string(),
-                )),
-                headers: HashMap::from([(
-                    "X-Workspace".to_string(),
-                    secrecy::Secret::new("top-secret".to_string()),
-                )]),
-                env: HashMap::from([("SHOULD_NOT_LEAK".to_string(), "value".to_string())]),
-                ..Default::default()
-            },
-        );
+        reg.servers.insert("remote".into(), McpServerConfig {
+            transport: TransportType::Sse,
+            url: Some(secrecy::Secret::new(
+                "https://mcp.example.com/mcp?token=secret-value".to_string(),
+            )),
+            headers: HashMap::from([(
+                "X-Workspace".to_string(),
+                secrecy::Secret::new("top-secret".to_string()),
+            )]),
+            env: HashMap::from([("SHOULD_NOT_LEAK".to_string(), "value".to_string())]),
+            ..Default::default()
+        });
         let mgr = McpManager::new(reg);
 
         let statuses = mgr.status_all().await;
@@ -655,16 +649,13 @@ mod tests {
         }
 
         let mut reg = McpRegistry::new();
-        reg.servers.insert(
-            "remote".into(),
-            McpServerConfig {
-                transport: TransportType::Sse,
-                url: Some(secrecy::Secret::new(
-                    "https://mcp.example.com/mcp".to_string(),
-                )),
-                ..Default::default()
-            },
-        );
+        reg.servers.insert("remote".into(), McpServerConfig {
+            transport: TransportType::Sse,
+            url: Some(secrecy::Secret::new(
+                "https://mcp.example.com/mcp".to_string(),
+            )),
+            ..Default::default()
+        });
         let mgr = McpManager::new(reg);
         mgr.inner
             .write()
@@ -690,14 +681,11 @@ mod tests {
     #[tokio::test]
     async fn test_oauth_start_server_requires_sse_transport() {
         let mut reg = McpRegistry::new();
-        reg.servers.insert(
-            "stdio".into(),
-            McpServerConfig {
-                command: "echo".into(),
-                transport: TransportType::Stdio,
-                ..Default::default()
-            },
-        );
+        reg.servers.insert("stdio".into(), McpServerConfig {
+            command: "echo".into(),
+            transport: TransportType::Stdio,
+            ..Default::default()
+        });
         let mgr = McpManager::new(reg);
         let err = mgr
             .oauth_start_server("stdio", "https://example.com/auth/callback")

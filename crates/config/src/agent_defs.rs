@@ -294,29 +294,20 @@ Search thoroughly.
     #[test]
     fn test_merge_does_not_override_toml() {
         let mut presets = HashMap::new();
-        presets.insert(
-            "reviewer".to_string(),
-            AgentPreset {
-                model: Some("opus".into()),
-                ..Default::default()
-            },
-        );
+        presets.insert("reviewer".to_string(), AgentPreset {
+            model: Some("opus".into()),
+            ..Default::default()
+        });
 
         let mut defs = HashMap::new();
-        defs.insert(
-            "reviewer".to_string(),
-            AgentPreset {
-                model: Some("haiku".into()),
-                ..Default::default()
-            },
-        );
-        defs.insert(
-            "scout".to_string(),
-            AgentPreset {
-                model: Some("sonnet".into()),
-                ..Default::default()
-            },
-        );
+        defs.insert("reviewer".to_string(), AgentPreset {
+            model: Some("haiku".into()),
+            ..Default::default()
+        });
+        defs.insert("scout".to_string(), AgentPreset {
+            model: Some("sonnet".into()),
+            ..Default::default()
+        });
 
         merge_agent_defs(&mut presets, defs);
 

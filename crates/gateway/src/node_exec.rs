@@ -113,14 +113,13 @@ pub async fn exec_on_node(
     let (tx, rx) = tokio::sync::oneshot::channel();
     {
         let mut inner = state.inner.write().await;
-        inner.pending_invokes.insert(
-            invoke_id.clone(),
-            crate::state::PendingInvoke {
+        inner
+            .pending_invokes
+            .insert(invoke_id.clone(), crate::state::PendingInvoke {
                 request_id: invoke_id.clone(),
                 sender: tx,
                 created_at: std::time::Instant::now(),
-            },
-        );
+            });
     }
 
     let timeout = Duration::from_secs(timeout_secs.max(5));
@@ -180,14 +179,13 @@ pub async fn query_node_providers(
     let (tx, rx) = tokio::sync::oneshot::channel();
     {
         let mut inner = state.inner.write().await;
-        inner.pending_invokes.insert(
-            invoke_id.clone(),
-            crate::state::PendingInvoke {
+        inner
+            .pending_invokes
+            .insert(invoke_id.clone(), crate::state::PendingInvoke {
                 request_id: invoke_id.clone(),
                 sender: tx,
                 created_at: std::time::Instant::now(),
-            },
-        );
+            });
     }
 
     let result = match tokio::time::timeout(Duration::from_secs(10), rx).await {

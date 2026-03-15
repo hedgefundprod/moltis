@@ -881,16 +881,13 @@ mod tests {
             provider,
             Arc::new(ToolRegistry::new()),
         )
-        .with_agents_config(agents_config_with_presets(
-            Some("default"),
-            &[(
-                "research",
-                AgentPreset {
-                    delegate_only: true,
-                    ..Default::default()
-                },
-            )],
-        ));
+        .with_agents_config(agents_config_with_presets(Some("default"), &[(
+            "research",
+            AgentPreset {
+                delegate_only: true,
+                ..Default::default()
+            },
+        )]));
 
         let (name, preset) = spawn_tool
             .resolve_preset(&serde_json::json!({ "preset": "research" }))
@@ -911,19 +908,16 @@ mod tests {
             provider,
             Arc::new(ToolRegistry::new()),
         )
-        .with_agents_config(agents_config_with_presets(
-            Some("default"),
-            &[(
-                "default",
-                AgentPreset {
-                    tools: PresetToolPolicy {
-                        allow: vec!["task_list".to_string()],
-                        ..Default::default()
-                    },
+        .with_agents_config(agents_config_with_presets(Some("default"), &[(
+            "default",
+            AgentPreset {
+                tools: PresetToolPolicy {
+                    allow: vec!["task_list".to_string()],
                     ..Default::default()
                 },
-            )],
-        ));
+                ..Default::default()
+            },
+        )]));
 
         let (name, preset) = spawn_tool
             .resolve_preset(&serde_json::json!({}))
@@ -1085,16 +1079,10 @@ mod tests {
             provider,
             Arc::new(ToolRegistry::new()),
         )
-        .with_agents_config(agents_config_with_presets(
-            None,
-            &[(
-                "slow",
-                AgentPreset {
-                    timeout_secs: Some(1),
-                    ..Default::default()
-                },
-            )],
-        ));
+        .with_agents_config(agents_config_with_presets(None, &[("slow", AgentPreset {
+            timeout_secs: Some(1),
+            ..Default::default()
+        })]));
 
         let params = serde_json::json!({
             "task": "do something slowly",
