@@ -3418,13 +3418,10 @@ mod tests {
         store.save("anthropic", "sk-saved").unwrap();
 
         let mut base = ProvidersConfig::default();
-        base.providers.insert(
-            "anthropic".into(),
-            ProviderEntry {
-                api_key: Some(Secret::new("sk-config".into())),
-                ..Default::default()
-            },
-        );
+        base.providers.insert("anthropic".into(), ProviderEntry {
+            api_key: Some(Secret::new("sk-config".into())),
+            ..Default::default()
+        });
         let merged = config_with_saved_keys(&base, &store, &[]);
         let entry = merged.get("anthropic").unwrap();
         // Config key takes precedence over saved key.
@@ -3592,13 +3589,10 @@ mod tests {
             offered: vec!["openai".into()],
             ..ProvidersConfig::default()
         };
-        config.providers.insert(
-            "anthropic".into(),
-            ProviderEntry {
-                api_key: Some(Secret::new("sk-test".into())),
-                ..Default::default()
-            },
-        );
+        config.providers.insert("anthropic".into(), ProviderEntry {
+            api_key: Some(Secret::new("sk-test".into())),
+            ..Default::default()
+        });
         let svc = LiveProviderSetupService::new(registry, config, None);
         let result = svc.available().await.unwrap();
         let arr = result
@@ -3626,16 +3620,13 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let token_store = TokenStore::with_path(dir.path().join("oauth_tokens.json"));
         token_store
-            .save(
-                "openai-codex",
-                &OAuthTokens {
-                    access_token: Secret::new("token".to_string()),
-                    refresh_token: None,
-                    id_token: None,
-                    account_id: None,
-                    expires_at: None,
-                },
-            )
+            .save("openai-codex", &OAuthTokens {
+                access_token: Secret::new("token".to_string()),
+                refresh_token: None,
+                id_token: None,
+                account_id: None,
+                expires_at: None,
+            })
             .expect("save oauth token");
 
         let key_store = KeyStore::with_path(dir.path().join("provider_keys.json"));
