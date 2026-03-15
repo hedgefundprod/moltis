@@ -3025,6 +3025,19 @@ pub(super) fn register(reg: &mut MethodRegistry) {
             })
         }),
     );
+    reg.register(
+        "models.inspect",
+        Box::new(|ctx| {
+            Box::pin(async move {
+                ctx.state
+                    .services
+                    .model
+                    .inspect(ctx.params.clone())
+                    .await
+                    .map_err(ErrorShape::from)
+            })
+        }),
+    );
 
     // Provider setup
     reg.register(

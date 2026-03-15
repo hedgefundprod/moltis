@@ -444,6 +444,31 @@ pub struct ModelInfo {
 
 #[derive(Debug, SimpleObject, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ModelInspection {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default, alias = "displayName")]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub supports_tools: Option<bool>,
+    #[serde(default)]
+    pub supports_vision: Option<bool>,
+    #[serde(default)]
+    pub static_context_window: Option<u64>,
+    #[serde(default)]
+    pub runtime_context_window: Option<u64>,
+    #[serde(default)]
+    pub metadata_context_length: Option<u64>,
+    #[serde(default)]
+    pub metadata_id: Option<String>,
+    #[serde(default)]
+    pub metadata_source: Option<String>,
+}
+
+#[derive(Debug, SimpleObject, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LocalSystemInfo {
     #[serde(default)]
     pub total_ram_gb: Option<f64>,

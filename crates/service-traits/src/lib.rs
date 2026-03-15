@@ -878,6 +878,8 @@ pub trait ModelService: Send + Sync {
     async fn detect_supported(&self, params: Value) -> ServiceResult;
     /// Test a single model by sending a probe request.
     async fn test(&self, params: Value) -> ServiceResult;
+    /// Inspect a single model and report resolved runtime metadata.
+    async fn inspect(&self, params: Value) -> ServiceResult;
 }
 
 pub struct NoopModelService;
@@ -916,6 +918,10 @@ impl ModelService for NoopModelService {
 
     async fn test(&self, _params: Value) -> ServiceResult {
         Err(model_service_not_configured_error("models.test"))
+    }
+
+    async fn inspect(&self, _params: Value) -> ServiceResult {
+        Err(model_service_not_configured_error("models.inspect"))
     }
 }
 
