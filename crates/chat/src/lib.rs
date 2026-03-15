@@ -2296,40 +2296,40 @@ impl ModelService for LiveModelService {
             metadata_source,
             runtime_context_window,
         ) = match metadata {
-            Ok(meta) => {
-                let runtime = if meta.context_length > 0 {
-                    u64::from(meta.context_length)
-                } else {
-                    static_context_window
-                };
-                (
-                    Some(u64::from(meta.context_length)),
-                    meta.max_output_tokens.map(u64::from),
-                    Some(meta.id.clone()),
-                    Some(
-                        if meta.context_length > 0
-                            && meta.context_length != provider.context_window()
-                        {
-                            "provider_metadata"
-                        } else {
-                            "static_fallback"
-                        }
-                        .to_string(),
-                    ),
-                    runtime,
-                )
-            },
-            Err(err) => {
-                debug!(provider = provider.id(), error = %err, "model inspection metadata fetch failed; using static context window");
-                (
-                    None,
-                    None,
-                    None,
-                    Some("static_fallback".to_string()),
-                    static_context_window,
-                )
-            },
-        };
+                Ok(meta) => {
+                    let runtime = if meta.context_length > 0 {
+                        u64::from(meta.context_length)
+                    } else {
+                        static_context_window
+                    };
+                    (
+                        Some(u64::from(meta.context_length)),
+                        meta.max_output_tokens.map(u64::from),
+                        Some(meta.id.clone()),
+                        Some(
+                            if meta.context_length > 0
+                                && meta.context_length != provider.context_window()
+                            {
+                                "provider_metadata"
+                            } else {
+                                "static_fallback"
+                            }
+                            .to_string(),
+                        ),
+                        runtime,
+                    )
+                },
+                Err(err) => {
+                    debug!(provider = provider.id(), error = %err, "model inspection metadata fetch failed; using static context window");
+                    (
+                        None,
+                        None,
+                        None,
+                        Some("static_fallback".to_string()),
+                        static_context_window,
+                    )
+                },
+            };
 
         Ok(serde_json::json!({
             "id": model.id,
