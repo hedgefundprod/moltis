@@ -368,7 +368,7 @@ function ProviderSection(props) {
 			${group.models.length > 0
 				? html`<div class="mt-2 flex flex-col gap-2">
 					${group.models.map((model) => html`<details key=${`meta-${model.id}`} class="rounded-md border border-[var(--border)]" open=${!!metadataEdits[model.id].contextWindow || !!metadataEdits[model.id].maxOutputTokens}>
-						<summary class="list-none cursor-pointer p-2">
+						<summary class="cursor-pointer p-2">
 							<div class="flex items-start justify-between gap-3">
 								<div class="min-w-0 flex-1">
 									<div class="flex items-center gap-2 min-w-0 flex-wrap">
@@ -379,7 +379,6 @@ function ProviderSection(props) {
 									</div>
 									${model.createdAt ? html`<time class="mt-1 text-xs text-[var(--muted)] opacity-60 block" data-epoch-ms=${model.createdAt * 1000} data-format="year-month"></time>` : null}
 								</div>
-								<div class="text-xs text-[var(--muted)] shrink-0">${t("providers:runtimeMetadata.inspect")}</div>
 							</div>
 						</summary>
 						<div class="px-2 pb-2 pt-0 border-t border-[var(--border)]">
@@ -408,7 +407,7 @@ function ProviderSection(props) {
 					</details>`)}
 				</div>`
 				: html`<div class="mt-2 text-xs text-[var(--muted)]">${t("providers:noActiveModels")}</div>`}
-			<div class="sticky bottom-0 mt-3 -mx-3 -mb-3 border-t border-[var(--border)] bg-[var(--surface)] px-3 py-2 flex justify-end">
+			<div class="mt-2 border-t border-[var(--border)] px-0 pt-2 flex justify-end">
 				<button class="provider-btn provider-btn-secondary provider-btn-sm" onClick=${onSaveMetadata}>${t("common:actions.save")}</button>
 			</div>
 		</div>
