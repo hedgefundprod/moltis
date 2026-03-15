@@ -229,15 +229,12 @@ impl KeyStore {
             return old_format
                 .into_iter()
                 .map(|(k, v)| {
-                    (
-                        k,
-                        ProviderConfig {
-                            api_key: Some(v),
-                            base_url: None,
-                            models: Vec::new(),
-                            display_name: None,
-                        },
-                    )
+                    (k, ProviderConfig {
+                        api_key: Some(v),
+                        base_url: None,
+                        models: Vec::new(),
+                        display_name: None,
+                    })
                 })
                 .collect();
         }
@@ -3259,11 +3256,9 @@ mod tests {
         let mut handles = Vec::new();
         for (provider, key, models) in [
             ("openai", "sk-openai", vec!["gpt-5".to_string()]),
-            (
-                "anthropic",
-                "sk-anthropic",
-                vec!["claude-sonnet-4".to_string()],
-            ),
+            ("anthropic", "sk-anthropic", vec![
+                "claude-sonnet-4".to_string(),
+            ]),
         ] {
             let store = store.clone();
             handles.push(std::thread::spawn(move || {
@@ -3391,13 +3386,12 @@ mod tests {
             .expect("openai-codex should exist");
 
         let mut config = ProvidersConfig::default();
-        config.providers.insert(
-            "openai-codex".into(),
-            ProviderEntry {
+        config
+            .providers
+            .insert("openai-codex".into(), ProviderEntry {
                 enabled: false,
                 ..Default::default()
-            },
-        );
+            });
 
         assert!(!svc.is_provider_configured(&provider, &config));
     }
@@ -3700,13 +3694,12 @@ mod tests {
             offered: vec!["openai".into()],
             ..ProvidersConfig::default()
         };
-        config.providers.insert(
-            "custom-openrouter-ai".into(),
-            ProviderEntry {
+        config
+            .providers
+            .insert("custom-openrouter-ai".into(), ProviderEntry {
                 enabled: true,
                 ..Default::default()
-            },
-        );
+            });
 
         let registry = Arc::new(RwLock::new(ProviderRegistry::from_env_with_config(
             &ProvidersConfig::default(),
@@ -4015,16 +4008,13 @@ mod tests {
             Some(&home)
         ));
 
-        home.save(
-            "github-copilot",
-            &OAuthTokens {
-                access_token: Secret::new("home-token".to_string()),
-                refresh_token: None,
-                id_token: None,
-                account_id: None,
-                expires_at: None,
-            },
-        )
+        home.save("github-copilot", &OAuthTokens {
+            access_token: Secret::new("home-token".to_string()),
+            refresh_token: None,
+            id_token: None,
+            account_id: None,
+            expires_at: None,
+        })
         .expect("save home token");
 
         assert!(has_oauth_tokens_for_provider(
@@ -4221,23 +4211,17 @@ mod tests {
         let mut empty = ProvidersConfig::default();
         assert!(!has_explicit_provider_settings(&empty));
 
-        empty.providers.insert(
-            "openai".into(),
-            ProviderEntry {
-                api_key: Some(Secret::new("sk-test".into())),
-                ..Default::default()
-            },
-        );
+        empty.providers.insert("openai".into(), ProviderEntry {
+            api_key: Some(Secret::new("sk-test".into())),
+            ..Default::default()
+        });
         assert!(has_explicit_provider_settings(&empty));
 
         let mut model_only = ProvidersConfig::default();
-        model_only.providers.insert(
-            "ollama".into(),
-            ProviderEntry {
-                models: vec!["llama3".into()],
-                ..Default::default()
-            },
-        );
+        model_only.providers.insert("ollama".into(), ProviderEntry {
+            models: vec!["llama3".into()],
+            ..Default::default()
+        });
         assert!(has_explicit_provider_settings(&model_only));
     }
 
@@ -4610,27 +4594,18 @@ mod tests {
     #[test]
     fn existing_custom_provider_for_base_url_prefers_canonical_name() {
         let mut existing = HashMap::new();
-        existing.insert(
-            "custom-openrouter-ai".into(),
-            ProviderConfig {
-                base_url: Some("https://openrouter.ai/api/v1".into()),
-                ..Default::default()
-            },
-        );
-        existing.insert(
-            "custom-openrouter-ai-2".into(),
-            ProviderConfig {
-                base_url: Some("https://OPENROUTER.ai/api/v1/".into()),
-                ..Default::default()
-            },
-        );
-        existing.insert(
-            "custom-together-ai".into(),
-            ProviderConfig {
-                base_url: Some("https://api.together.ai/v1".into()),
-                ..Default::default()
-            },
-        );
+        existing.insert("custom-openrouter-ai".into(), ProviderConfig {
+            base_url: Some("https://openrouter.ai/api/v1".into()),
+            ..Default::default()
+        });
+        existing.insert("custom-openrouter-ai-2".into(), ProviderConfig {
+            base_url: Some("https://OPENROUTER.ai/api/v1/".into()),
+            ..Default::default()
+        });
+        existing.insert("custom-together-ai".into(), ProviderConfig {
+            base_url: Some("https://api.together.ai/v1".into()),
+            ..Default::default()
+        });
 
         assert_eq!(
             existing_custom_provider_for_base_url("https://openrouter.ai/api/v1", &existing),
