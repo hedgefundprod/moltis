@@ -2289,8 +2289,13 @@ impl ModelService for LiveModelService {
 
         let static_context_window = u64::from(provider.context_window());
         let metadata = provider.model_metadata().await;
-        let (metadata_context_length, metadata_id, metadata_source, runtime_context_window) =
-            match metadata {
+        let (
+            metadata_context_length,
+            metadata_max_output_tokens,
+            metadata_id,
+            metadata_source,
+            runtime_context_window,
+        ) = match metadata {
                 Ok(meta) => {
                     let runtime = if meta.context_length > 0 {
                         u64::from(meta.context_length)
@@ -2299,6 +2304,7 @@ impl ModelService for LiveModelService {
                     };
                     (
                         Some(u64::from(meta.context_length)),
+                        meta.max_output_tokens.map(u64::from),
                         Some(meta.id.clone()),
                         Some(
                             if meta.context_length > 0
@@ -2318,6 +2324,7 @@ impl ModelService for LiveModelService {
                     (
                         None,
                         None,
+                        None,
                         Some("static_fallback".to_string()),
                         static_context_window,
                     )
@@ -2333,6 +2340,7 @@ impl ModelService for LiveModelService {
             "staticContextWindow": static_context_window,
             "runtimeContextWindow": runtime_context_window,
             "metadataContextLength": metadata_context_length,
+            "maxOutputTokens": metadata_max_output_tokens,
             "metadataId": metadata_id,
             "metadataSource": metadata_source,
         }))

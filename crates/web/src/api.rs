@@ -35,6 +35,7 @@ const SANDBOX_CONTAINERS_CLEAN_FAILED: &str = "SANDBOX_CONTAINERS_CLEAN_FAILED";
 const SANDBOX_DISK_USAGE_FAILED: &str = "SANDBOX_DISK_USAGE_FAILED";
 const SANDBOX_DAEMON_RESTART_FAILED: &str = "SANDBOX_DAEMON_RESTART_FAILED";
 const SANDBOX_SHARED_HOME_SAVE_FAILED: &str = "SANDBOX_SHARED_HOME_SAVE_FAILED";
+const PROVIDER_METADATA_SAVE_FAILED: &str = "PROVIDER_METADATA_SAVE_FAILED";
 const SESSION_HISTORY_FAILED: &str = "SESSION_HISTORY_FAILED";
 const SESSION_LIST_FAILED: &str = "SESSION_LIST_FAILED";
 const SESSION_LIST_DEFAULT_LIMIT: usize = 40;
@@ -77,6 +78,21 @@ fn shared_home_config_payload(config: &moltis_config::MoltisConfig) -> serde_jso
             .to_string(),
         "configured_path": config.tools.exec.sandbox.shared_home_dir.clone(),
     })
+}
+
+
+#[derive(serde::Deserialize)]
+pub struct ProviderMetadataOverrideRequest {
+    context_window: Option<u32>,
+    max_output_tokens: Option<u32>,
+}
+
+#[derive(serde::Deserialize)]
+pub struct ProviderMetadataUpdateRequest {
+    provider: String,
+    fetch_runtime_metadata: Option<bool>,
+    #[serde(default)]
+    model_overrides: HashMap<String, ProviderMetadataOverrideRequest>,
 }
 
 // ── Session media ────────────────────────────────────────────────────────────
@@ -857,6 +873,62 @@ pub async fn api_set_shared_home_handler(
         Err(e) => api_error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             SANDBOX_SHARED_HOME_SAVE_FAILED,
+            e.to_string(),
+        ),
+    }
+}
+
+
+pub async fn api_set_provider_metadata_handler(
+    Json(body): Json<ProviderMetadataUpdateRequest>,
+) -> impl IntoResponse {
+    let provider = body.provider.trim();
+    if provider.is_empty() {
+        return api_error_response(
+            StatusCode::BAD_REQUEST,
+            PROVIDER_METADATA_SAVE_FAILED,
+            "provider is required",
+        );
+    }
+
+    let update_result = moltis_config::update_config(|cfg| {
+        let entry = cfg.providers.providers.entry(provider.to_string()).or_default();
+        if let Some(fetch_runtime_metadata) = body.fetch_runtime_metadata {
+            entry.fetch_runtime_metadata = fetch_runtime_metadata;
+        }
+        entry.model_overrides = body
+            .model_overrides
+            .iter()
+            .filter_map(|(model_id, override_req)| {
+                let model = model_id.trim();
+                if model.is_empty() {
+                    return None;
+                }
+                let has_values =
+                    override_req.context_window.is_some() || override_req.max_output_tokens.is_some();
+                if !has_values {
+                    return None;
+                }
+                Some((
+                    model.to_string(),
+                    moltis_config::schema::ProviderModelOverride {
+                        context_window: override_req.context_window,
+                        max_output_tokens: override_req.max_output_tokens,
+                    },
+                ))
+            })
+            .collect();
+    });
+
+    match update_result {
+        Ok(saved_path) => Json(serde_json::json!({
+            "ok": true,
+            "config_path": saved_path.display().to_string(),
+        }))
+        .into_response(),
+        Err(e) => api_error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            PROVIDER_METADATA_SAVE_FAILED,
             e.to_string(),
         ),
     }

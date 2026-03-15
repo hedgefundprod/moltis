@@ -91,6 +91,10 @@ fn build_api_routes() -> Router<AppState> {
             get(api::api_get_shared_home_handler).put(api::api_set_shared_home_handler),
         )
         .route(
+            "/api/providers/metadata",
+            axum::routing::put(api::api_set_provider_metadata_handler),
+        )
+        .route(
             "/api/sandbox/containers",
             get(api::api_list_containers_handler),
         )

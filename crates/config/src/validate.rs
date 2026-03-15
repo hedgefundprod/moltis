@@ -116,6 +116,11 @@ fn build_schema_map() -> KnownKeys {
             ("url", Leaf),
             ("models", Leaf),
             ("fetch_models", Leaf),
+            ("fetch_runtime_metadata", Leaf),
+            ("model_overrides", Map(Box::new(Struct(HashMap::from([
+                ("context_window", Leaf),
+                ("max_output_tokens", Leaf),
+            ]))))),
             ("stream_transport", Leaf),
             ("alias", Leaf),
             ("tool_mode", Leaf),

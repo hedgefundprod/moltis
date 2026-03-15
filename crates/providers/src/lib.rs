@@ -198,6 +198,23 @@ fn should_fetch_models(config: &ProvidersConfig, provider: &str) -> bool {
     config.get(provider).is_none_or(|entry| entry.fetch_models)
 }
 
+fn metadata_policy_for_model(
+    config: &ProvidersConfig,
+    provider: &str,
+    model_id: &str,
+) -> (bool, Option<moltis_config::schema::ProviderModelOverride>) {
+    let raw_model = raw_model_id(model_id).trim();
+    let entry = config.get(provider);
+    let fetch_runtime_metadata = entry.is_none_or(|cfg| cfg.fetch_runtime_metadata);
+    let metadata_override = entry.and_then(|cfg| {
+        cfg.model_overrides
+            .get(raw_model)
+            .cloned()
+            .or_else(|| cfg.model_overrides.get(model_id).cloned())
+    });
+    (fetch_runtime_metadata, metadata_override)
+}
+
 fn merge_preferred_and_discovered_models(
     preferred: Vec<String>,
     discovered: Vec<DiscoveredModel>,
@@ -528,6 +545,8 @@ fn probe_ollama_models_batch(
 struct RegistryModelProvider {
     model_id: String,
     inner: Arc<dyn LlmProvider>,
+    fetch_runtime_metadata: bool,
+    metadata_override: Option<moltis_config::schema::ProviderModelOverride>,
 }
 
 #[async_trait::async_trait]
@@ -557,7 +576,10 @@ impl LlmProvider for RegistryModelProvider {
     }
 
     fn context_window(&self) -> u32 {
-        self.inner.context_window()
+        self.metadata_override
+            .as_ref()
+            .and_then(|ov| ov.context_window)
+            .unwrap_or_else(|| self.inner.context_window())
     }
 
     fn supports_vision(&self) -> bool {
@@ -565,7 +587,24 @@ impl LlmProvider for RegistryModelProvider {
     }
 
     async fn model_metadata(&self) -> anyhow::Result<moltis_agents::model::ModelMetadata> {
-        self.inner.model_metadata().await
+        let mut metadata = if self.fetch_runtime_metadata {
+            self.inner.model_metadata().await?
+        } else {
+            moltis_agents::model::ModelMetadata {
+                id: self.inner.id().to_string(),
+                context_length: self.inner.context_window(),
+                max_output_tokens: None,
+            }
+        };
+        if let Some(override_cfg) = &self.metadata_override {
+            if let Some(context_window) = override_cfg.context_window {
+                metadata.context_length = context_window;
+            }
+            if let Some(max_output_tokens) = override_cfg.max_output_tokens {
+                metadata.max_output_tokens = Some(max_output_tokens);
+            }
+        }
+        Ok(metadata)
     }
 
     fn stream(
@@ -595,6 +634,8 @@ impl LlmProvider for RegistryModelProvider {
         Some(Arc::new(RegistryModelProvider {
             model_id: self.model_id.clone(),
             inner: new_inner,
+            fetch_runtime_metadata: self.fetch_runtime_metadata,
+            metadata_override: self.metadata_override.clone(),
         }))
     }
 }
@@ -1302,6 +1343,28 @@ impl ProviderRegistry {
         let wrapped: Arc<dyn LlmProvider> = Arc::new(RegistryModelProvider {
             model_id: registry_model_id.clone(),
             inner: provider,
+            fetch_runtime_metadata: true,
+            metadata_override: None,
+        });
+        self.providers.insert(registry_model_id, wrapped);
+        self.models.push(info);
+    }
+
+    pub fn register_with_metadata_policy(
+        &mut self,
+        mut info: ModelInfo,
+        provider: Arc<dyn LlmProvider>,
+        fetch_runtime_metadata: bool,
+        metadata_override: Option<moltis_config::schema::ProviderModelOverride>,
+    ) {
+        let model_id = raw_model_id(&info.id).to_string();
+        let registry_model_id = namespaced_model_id(&info.provider, &model_id);
+        info.id = registry_model_id.clone();
+        let wrapped: Arc<dyn LlmProvider> = Arc::new(RegistryModelProvider {
+            model_id: registry_model_id.clone(),
+            inner: provider,
+            fetch_runtime_metadata,
+            metadata_override,
         });
         self.providers.insert(registry_model_id, wrapped);
         self.models.push(info);
@@ -2004,7 +2067,9 @@ impl ProviderRegistry {
                     base_url.clone(),
                     alias.clone(),
                 ));
-                self.register(
+                let (fetch_runtime_metadata, metadata_override) =
+                    metadata_policy_for_model(config, "anthropic", &model_id);
+                self.register_with_metadata_policy(
                     ModelInfo {
                         id: model_id,
                         provider: provider_label.clone(),
@@ -2012,6 +2077,8 @@ impl ProviderRegistry {
                         created_at,
                     },
                     provider,
+                    fetch_runtime_metadata,
+                    metadata_override,
                 );
             }
         }
@@ -2065,7 +2132,9 @@ impl ProviderRegistry {
                     )
                     .with_stream_transport(stream_transport),
                 );
-                self.register(
+                let (fetch_runtime_metadata, metadata_override) =
+                    metadata_policy_for_model(config, "openai", &model_id);
+                self.register_with_metadata_policy(
                     ModelInfo {
                         id: model_id,
                         provider: provider_label.clone(),
@@ -2073,6 +2142,8 @@ impl ProviderRegistry {
                         created_at,
                     },
                     provider,
+                    fetch_runtime_metadata,
+                    metadata_override,
                 );
             }
         }
@@ -2212,7 +2283,9 @@ impl ProviderRegistry {
                 }
 
                 let provider = Arc::new(oai);
-                self.register(
+                let (fetch_runtime_metadata, metadata_override) =
+                    metadata_policy_for_model(config, def.config_name, &model_id);
+                self.register_with_metadata_policy(
                     ModelInfo {
                         id: model_id,
                         provider: provider_label.clone(),
@@ -2220,6 +2293,8 @@ impl ProviderRegistry {
                         created_at,
                     },
                     provider,
+                    fetch_runtime_metadata,
+                    metadata_override,
                 );
             }
         }
@@ -2288,7 +2363,9 @@ impl ProviderRegistry {
                     oai = oai.with_tool_mode(custom_tool_mode);
                 }
                 let provider = Arc::new(oai);
-                self.register(
+                let (fetch_runtime_metadata, metadata_override) =
+                    metadata_policy_for_model(config, name, &model_id);
+                self.register_with_metadata_policy(
                     ModelInfo {
                         id: model_id,
                         provider: name.clone(),
@@ -2296,6 +2373,8 @@ impl ProviderRegistry {
                         created_at,
                     },
                     provider,
+                    fetch_runtime_metadata,
+                    metadata_override,
                 );
             }
 

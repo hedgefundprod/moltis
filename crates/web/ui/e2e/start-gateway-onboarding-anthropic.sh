@@ -24,6 +24,19 @@ cd "${REPO_ROOT}"
 export MOLTIS_CONFIG_DIR="${CONFIG_DIR}"
 export MOLTIS_DATA_DIR="${DATA_DIR}"
 export MOLTIS_SERVER__PORT="${PORT}"
+
+run_cargo() {
+	if command -v rustup >/dev/null 2>&1; then
+		local toolchain_bin
+		toolchain_bin="$(dirname "$(rustup which --toolchain nightly-2025-11-30 rustc)")"
+		export PATH="${toolchain_bin}:$PATH"
+		export RUSTC="${toolchain_bin}/rustc"
+		export RUSTDOC="${toolchain_bin}/rustdoc"
+		exec "${toolchain_bin}/cargo" "$@"
+	else
+		exec cargo "+nightly-2025-11-30" "$@"
+	fi
+}
 # Keep rustup/cargo toolchains available after HOME isolation so
 # stale-binary fallback can still rebuild when needed.
 if [ -z "${RUSTUP_HOME:-}" ] && [ -n "${ORIGINAL_HOME}" ]; then
@@ -92,5 +105,5 @@ fi
 if [ -n "${BINARY}" ]; then
 	exec "${BINARY}" --no-tls --bind 127.0.0.1 --port "${PORT}"
 else
-	exec cargo +nightly-2025-11-30 run --bin moltis -- --no-tls --bind 127.0.0.1 --port "${PORT}"
+	run_cargo run --bin moltis -- --no-tls --bind 127.0.0.1 --port "${PORT}"
 fi

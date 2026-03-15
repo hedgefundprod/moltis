@@ -38,6 +38,16 @@ test.describe("Provider setup page", () => {
 		expect(pageErrors).toEqual([]);
 	});
 
+	test("runtime metadata panel is visible for configured providers", async ({ page }) => {
+		await openProvidersPage(page);
+		const emptyState = page.locator("#providersEmptyState");
+		if (await emptyState.count()) {
+			await expect(emptyState.first()).toBeVisible();
+			return;
+		}
+		await expect(page.locator('[data-testid^="runtime-metadata-"]').first()).toBeVisible();
+	});
+
 	test("provider modal honors configured provider order", async ({ page }) => {
 		const pageErrors = watchPageErrors(page);
 		await openProvidersPage(page);
