@@ -7,7 +7,7 @@ use std::{
     sync::Arc,
 };
 
-use secrecy::{ExposeSecret, Secret};
+use secrecy::Secret;
 
 use {
     axum::{
@@ -133,11 +133,14 @@ impl moltis_tools::location::LocationRequester for GatewayLocationRequester {
         {
             let mut inner_w = self.state.inner.write().await;
             let invokes = &mut inner_w.pending_invokes;
-            invokes.insert(request_id.clone(), crate::state::PendingInvoke {
-                request_id: request_id.clone(),
-                sender: tx,
-                created_at: std::time::Instant::now(),
-            });
+            invokes.insert(
+                request_id.clone(),
+                crate::state::PendingInvoke {
+                    request_id: request_id.clone(),
+                    sender: tx,
+                    created_at: std::time::Instant::now(),
+                },
+            );
         }
 
         // Wait up to 30 seconds for the user to grant/deny permission.
@@ -251,13 +254,14 @@ impl moltis_tools::location::LocationRequester for GatewayLocationRequester {
         let (tx, rx) = tokio::sync::oneshot::channel();
         {
             let mut inner = self.state.inner.write().await;
-            inner
-                .pending_invokes
-                .insert(pending_key.clone(), crate::state::PendingInvoke {
+            inner.pending_invokes.insert(
+                pending_key.clone(),
+                crate::state::PendingInvoke {
                     request_id: pending_key.clone(),
                     sender: tx,
                     created_at: std::time::Instant::now(),
-                });
+                },
+            );
         }
 
         // Wait up to 60 seconds — user needs to navigate Telegram's UI.
@@ -363,18 +367,6 @@ fn browser_container_prefix(instance_slug: &str) -> String {
     format!("moltis-{instance_slug}-browser")
 }
 
-fn env_value_with_overrides(env_overrides: &HashMap<String, String>, key: &str) -> Option<String> {
-    std::env::var(key)
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .or_else(|| {
-            env_overrides
-                .get(key)
-                .cloned()
-                .filter(|value| !value.trim().is_empty())
-        })
-}
-
 fn merge_env_overrides(
     base_overrides: &HashMap<String, String>,
     additional: Vec<(String, String)>,
@@ -452,66 +444,6 @@ fn log_startup_model_inventory(reg: &ProviderRegistry) {
             ),
             "startup provider model inventory"
         );
-    }
-}
-
-async fn ollama_has_model(base_url: &str, model: &str) -> bool {
-    let url = format!("{}/api/tags", base_url.trim_end_matches('/'));
-    let response = match reqwest::Client::new().get(url).send().await {
-        Ok(resp) => resp,
-        Err(_) => return false,
-    };
-    if !response.status().is_success() {
-        return false;
-    }
-    let value: serde_json::Value = match response.json().await {
-        Ok(v) => v,
-        Err(_) => return false,
-    };
-    value
-        .get("models")
-        .and_then(|m| m.as_array())
-        .map(|models| {
-            models.iter().any(|m| {
-                let name = m.get("name").and_then(|n| n.as_str()).unwrap_or_default();
-                name == model || name.starts_with(&format!("{model}:"))
-            })
-        })
-        .unwrap_or(false)
-}
-
-async fn ensure_ollama_model(base_url: &str, model: &str) {
-    if ollama_has_model(base_url, model).await {
-        return;
-    }
-
-    warn!(
-        model = %model,
-        base_url = %base_url,
-        "memory: missing Ollama embedding model, attempting auto-pull"
-    );
-
-    let url = format!("{}/api/pull", base_url.trim_end_matches('/'));
-    let pull = reqwest::Client::new()
-        .post(url)
-        .json(&serde_json::json!({ "name": model, "stream": false }))
-        .send()
-        .await;
-
-    match pull {
-        Ok(resp) if resp.status().is_success() => {
-            info!(model = %model, "memory: Ollama model pull complete");
-        },
-        Ok(resp) => {
-            warn!(
-                model = %model,
-                status = %resp.status(),
-                "memory: Ollama model pull failed"
-            );
-        },
-        Err(e) => {
-            warn!(model = %model, error = %e, "memory: Ollama model pull request failed");
-        },
     }
 }
 
@@ -1681,9 +1613,9 @@ pub async fn prepare_gateway(
                         token_url: o.token_url.clone(),
                         scopes: o.scopes.clone(),
                     });
-                merged
-                    .servers
-                    .insert(name.clone(), moltis_mcp::McpServerConfig {
+                merged.servers.insert(
+                    name.clone(),
+                    moltis_mcp::McpServerConfig {
                         command: entry.command.clone(),
                         args: entry.args.clone(),
                         env: entry.env.clone(),
@@ -1696,7 +1628,8 @@ pub async fn prepare_gateway(
                             .map(|(key, value)| (key.clone(), Secret::new(value.clone())))
                             .collect(),
                         oauth,
-                    });
+                    },
+                );
             }
         }
         mcp_configured_count = merged.servers.values().filter(|s| s.enabled).count();
@@ -1761,54 +1694,13 @@ pub async fn prepare_gateway(
             }
         });
     }
-    let db_path = data_dir.join("moltis.db");
-    let db_pool = {
-        use {
-            sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous},
-            std::str::FromStr,
-        };
-        let db_exists = db_path.exists();
-        let mut options = SqliteConnectOptions::from_str(&format!("sqlite:{}", db_path.display()))
-            .expect("invalid database path")
-            .create_if_missing(true)
-            .synchronous(SqliteSynchronous::Normal)
-            .busy_timeout(std::time::Duration::from_secs(5));
-        if !db_exists {
-            // Setting journal_mode can briefly require an exclusive lock.
-            // For existing databases, preserve current mode to avoid startup stalls.
-            options = options.journal_mode(SqliteJournalMode::Wal);
-        }
+    let db_pool = crate::runtime_db::open_sqlite_pool(&data_dir, config.server.db_pool_max_connections)
+        .await
+        .expect("failed to open moltis.db");
 
-        let started = std::time::Instant::now();
-        let pool = sqlx::pool::PoolOptions::new()
-            .max_connections(config.server.db_pool_max_connections)
-            .connect_with(options)
-            .await
-            .expect("failed to open moltis.db");
-        debug!(
-            path = %db_path.display(),
-            db_exists,
-            elapsed_ms = started.elapsed().as_millis(),
-            "startup sqlite pool connected"
-        );
-        pool
-    };
-
-    // Run database migrations from each crate in dependency order.
-    // Order matters: sessions depends on projects (FK reference).
-    moltis_projects::run_migrations(&db_pool)
+    crate::runtime_db::migrate_sqlite_pool(&db_pool)
         .await
-        .expect("failed to run projects migrations");
-    moltis_sessions::run_migrations(&db_pool)
-        .await
-        .expect("failed to run sessions migrations");
-    moltis_cron::run_migrations(&db_pool)
-        .await
-        .expect("failed to run cron migrations");
-    // Gateway's own tables (auth, message_log, channels).
-    crate::run_migrations(&db_pool)
-        .await
-        .expect("failed to run gateway migrations");
+        .expect("failed to run shared database migrations");
 
     // Vault migrations (vault_metadata table).
     #[cfg(feature = "vault")]
@@ -2314,10 +2206,15 @@ pub async fn prepare_gateway(
             // Spawn async broadcast in a background task since we're in a sync callback.
             let state = Arc::clone(state);
             tokio::spawn(async move {
-                broadcast(&state, event, payload, BroadcastOpts {
-                    drop_if_slow: true,
-                    ..Default::default()
-                })
+                broadcast(
+                    &state,
+                    event,
+                    payload,
+                    BroadcastOpts {
+                        drop_if_slow: true,
+                        ..Default::default()
+                    },
+                )
                 .await;
             });
         });
@@ -2942,245 +2839,23 @@ pub async fn prepare_gateway(
 
     // ── Memory system initialization ─────────────────────────────────────
     let memory_manager: Option<Arc<moltis_memory::manager::MemoryManager>> = {
-        // Build embedding provider(s) for the fallback chain.
-        let mut embedding_providers: Vec<(
-            String,
-            Box<dyn moltis_memory::embeddings::EmbeddingProvider>,
-        )> = Vec::new();
-
-        let mem_cfg = &config.memory;
-
-        if mem_cfg.disable_rag {
-            info!("memory: RAG disabled via memory.disable_rag=true, using keyword-only search");
-        } else {
-            // 1. If user explicitly configured an embedding provider, use it.
-            if let Some(ref provider_name) = mem_cfg.provider {
-                match provider_name.as_str() {
-                    "local" => {
-                        // Local GGUF embeddings require the `local-embeddings` feature on moltis-memory.
-                        #[cfg(feature = "local-embeddings")]
-                        {
-                            let cache_dir = mem_cfg
-                                .base_url
-                                .as_ref()
-                                .map(PathBuf::from)
-                                .unwrap_or_else(
-                                    moltis_memory::embeddings_local::LocalGgufEmbeddingProvider::default_cache_dir,
-                                );
-                            match moltis_memory::embeddings_local::LocalGgufEmbeddingProvider::ensure_model(
-                                cache_dir,
-                            )
-                            .await
-                            {
-                                Ok(path) => {
-                                    match moltis_memory::embeddings_local::LocalGgufEmbeddingProvider::new(
-                                        path,
-                                    ) {
-                                        Ok(p) => embedding_providers.push(("local-gguf".into(), Box::new(p))),
-                                        Err(e) => warn!("memory: failed to load local GGUF model: {e}"),
-                                    }
-                                },
-                                Err(e) => warn!("memory: failed to ensure local model: {e}"),
-                            }
-                        }
-                        #[cfg(not(feature = "local-embeddings"))]
-                        warn!(
-                            "memory: 'local' embedding provider requires the 'local-embeddings' feature"
-                        );
-                    },
-                    "ollama" | "custom" | "openai" => {
-                        let base_url = mem_cfg.base_url.clone().unwrap_or_else(|| {
-                            match provider_name.as_str() {
-                                "ollama" => "http://localhost:11434".into(),
-                                _ => "https://api.openai.com".into(),
-                            }
-                        });
-                        if provider_name == "ollama" {
-                            let model = mem_cfg.model.as_deref().unwrap_or("nomic-embed-text");
-                            ensure_ollama_model(&base_url, model).await;
-                        }
-                        let api_key = mem_cfg
-                            .api_key
-                            .as_ref()
-                            .map(|k| k.expose_secret().clone())
-                            .or_else(|| {
-                                env_value_with_overrides(&runtime_env_overrides, "OPENAI_API_KEY")
-                            })
-                            .unwrap_or_default();
-                        let mut e =
-                            moltis_memory::embeddings_openai::OpenAiEmbeddingProvider::new(api_key);
-                        if base_url != "https://api.openai.com" {
-                            e = e.with_base_url(base_url);
-                        }
-                        if let Some(ref model) = mem_cfg.model {
-                            // Use a sensible default dims; the API returns the actual dims.
-                            e = e.with_model(model.clone(), 1536);
-                        }
-                        embedding_providers.push((provider_name.clone(), Box::new(e)));
-                    },
-                    other => warn!("memory: unknown embedding provider '{other}'"),
-                }
-            }
-
-            // 2. Auto-detect: try Ollama health check.
-            if embedding_providers.is_empty() {
-                let ollama_ok = reqwest::Client::new()
-                    .get("http://localhost:11434/api/tags")
-                    .timeout(std::time::Duration::from_secs(2))
-                    .send()
-                    .await
-                    .is_ok();
-                if ollama_ok {
-                    ensure_ollama_model("http://localhost:11434", "nomic-embed-text").await;
-                    let e = moltis_memory::embeddings_openai::OpenAiEmbeddingProvider::new(
-                        String::new(),
-                    )
-                    .with_base_url("http://localhost:11434".into())
-                    .with_model("nomic-embed-text".into(), 768);
-                    embedding_providers.push(("ollama".into(), Box::new(e)));
-                    info!("memory: detected Ollama at localhost:11434");
-                }
-            }
-
-            // 3. Auto-detect: try remote API-key providers.
-            const EMBEDDING_CANDIDATES: &[(&str, &str, &str)] = &[
-                ("openai", "OPENAI_API_KEY", "https://api.openai.com"),
-                ("mistral", "MISTRAL_API_KEY", "https://api.mistral.ai/v1"),
-                (
-                    "openrouter",
-                    "OPENROUTER_API_KEY",
-                    "https://openrouter.ai/api/v1",
-                ),
-                ("groq", "GROQ_API_KEY", "https://api.groq.com/openai"),
-                ("xai", "XAI_API_KEY", "https://api.x.ai"),
-                ("deepseek", "DEEPSEEK_API_KEY", "https://api.deepseek.com"),
-                ("cerebras", "CEREBRAS_API_KEY", "https://api.cerebras.ai/v1"),
-                ("minimax", "MINIMAX_API_KEY", "https://api.minimax.io/v1"),
-                ("moonshot", "MOONSHOT_API_KEY", "https://api.moonshot.ai/v1"),
-                ("venice", "VENICE_API_KEY", "https://api.venice.ai/api/v1"),
-            ];
-
-            for (config_name, env_key, default_base) in EMBEDDING_CANDIDATES {
-                let key = effective_providers
-                    .get(config_name)
-                    .and_then(|e| e.api_key.as_ref().map(|k| k.expose_secret().clone()))
-                    .or_else(|| env_value_with_overrides(&runtime_env_overrides, env_key))
-                    .filter(|k| !k.is_empty());
-                if let Some(api_key) = key {
-                    let base = effective_providers
-                        .get(config_name)
-                        .and_then(|e| e.base_url.clone())
-                        .unwrap_or_else(|| default_base.to_string());
-                    let mut e =
-                        moltis_memory::embeddings_openai::OpenAiEmbeddingProvider::new(api_key);
-                    if base != "https://api.openai.com" {
-                        e = e.with_base_url(base);
-                    }
-                    embedding_providers.push((config_name.to_string(), Box::new(e)));
-                }
-            }
-        }
-
-        // Build the final embedder: fallback chain, single provider, or keyword-only.
-        let embedder: Option<Box<dyn moltis_memory::embeddings::EmbeddingProvider>> = if mem_cfg
-            .disable_rag
-        {
-            None
-        } else if embedding_providers.is_empty() {
-            info!("memory: no embedding provider found, using keyword-only search");
-            None
-        } else {
-            let names: Vec<&str> = embedding_providers
-                .iter()
-                .map(|(n, _)| n.as_str())
-                .collect();
-            if embedding_providers.len() == 1 {
-                if let Some((name, provider)) = embedding_providers.into_iter().next() {
-                    info!(provider = %name, "memory: using single embedding provider");
-                    Some(provider)
-                } else {
-                    None
-                }
-            } else {
-                info!(providers = ?names, active = names[0], "memory: fallback chain configured");
-                Some(Box::new(
-                    moltis_memory::embeddings_fallback::FallbackEmbeddingProvider::new(
-                        embedding_providers,
-                    ),
-                ))
-            }
-        };
-
-        let memory_db_path = data_dir.join("memory.db");
-        let memory_pool_result = {
-            use {
-                sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous},
-                std::str::FromStr,
-            };
-            let options =
-                SqliteConnectOptions::from_str(&format!("sqlite:{}", memory_db_path.display()))
-                    .expect("invalid memory database path")
-                    .create_if_missing(true)
-                    .journal_mode(SqliteJournalMode::Wal)
-                    .synchronous(SqliteSynchronous::Normal)
-                    .busy_timeout(std::time::Duration::from_secs(5));
-            sqlx::pool::PoolOptions::new()
-                .max_connections(config.server.db_pool_max_connections)
-                .connect_with(options)
-                .await
-        };
+        let memory_pool_result = moltis_memory::runtime::open_sqlite_pool(&data_dir, false).await;
         match memory_pool_result {
             Ok(memory_pool) => {
-                if let Err(e) = moltis_memory::schema::run_migrations(&memory_pool).await {
+                if let Err(e) = moltis_memory::runtime::migrate_sqlite_pool(&memory_pool).await {
                     tracing::warn!("memory migration failed: {e}");
                     None
                 } else {
-                    // Scan the data directory for memory files written by the
-                    // silent memory turn (MEMORY.md, memory/*.md).
-                    let data_memory_file = data_dir.join("MEMORY.md");
-                    let data_memory_file_lower = data_dir.join("memory.md");
-                    let data_memory_sub = data_dir.join("memory");
-                    let agents_root = data_dir.join("agents");
-
-                    let config = moltis_memory::config::MemoryConfig {
-                        db_path: memory_db_path.to_string_lossy().into(),
-                        data_dir: Some(data_dir.clone()),
-                        memory_dirs: vec![
-                            data_memory_file,
-                            data_memory_file_lower,
-                            data_memory_sub,
-                            // Include all agent workspaces so per-agent memory writes
-                            // remain indexed across periodic full syncs.
-                            agents_root,
-                        ],
-                        ..Default::default()
-                    };
-
-                    let store = Box::new(moltis_memory::store_sqlite::SqliteMemoryStore::new(
-                        memory_pool,
-                    ));
-                    // Map file entries to their parent directory so that
-                    // root-level files like MEMORY.md are covered by the
-                    // watcher. Deduplicate via BTreeSet to avoid watching
-                    // the same directory twice.
-                    let watch_dirs: Vec<_> = config
-                        .memory_dirs
-                        .iter()
-                        .map(|p| {
-                            if p.is_dir() {
-                                p.clone()
-                            } else {
-                                p.parent().unwrap_or(p.as_path()).to_path_buf()
-                            }
-                        })
-                        .collect::<std::collections::BTreeSet<_>>()
-                        .into_iter()
-                        .collect();
-                    let manager = Arc::new(if let Some(embedder) = embedder {
-                        moltis_memory::manager::MemoryManager::new(config, store, embedder)
-                    } else {
-                        moltis_memory::manager::MemoryManager::keyword_only(config, store)
-                    });
+                    let manager = Arc::new(
+                        crate::provider_setup::build_memory_manager_from_pool(
+                            &config,
+                            &data_dir,
+                            &effective_providers,
+                            &runtime_env_overrides,
+                            memory_pool,
+                        )
+                        .await,
+                    );
 
                     // Initial sync + periodic re-sync (15min with watcher, 5min without).
                     let sync_manager = Arc::clone(&manager);
@@ -4272,6 +3947,7 @@ pub async fn prepare_gateway(
     }
 
     // Resolve TLS configuration (only when compiled with the `tls` feature).
+    #[cfg_attr(not(feature = "tls"), allow(unused_variables))]
     let tls_active = tls_enabled_for_gateway;
 
     #[cfg(feature = "tls")]
@@ -4455,10 +4131,15 @@ pub async fn prepare_gateway(
                                 "version": entry.version,
                             });
                         }
-                        broadcast(&ws_state, "session", payload, BroadcastOpts {
-                            drop_if_slow: true,
-                            ..Default::default()
-                        })
+                        broadcast(
+                            &ws_state,
+                            "session",
+                            payload,
+                            BroadcastOpts {
+                                drop_if_slow: true,
+                                ..Default::default()
+                            },
+                        )
                         .await;
                     },
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
@@ -4502,10 +4183,15 @@ pub async fn prepare_gateway(
                 }
             };
             if changed && let Ok(payload) = serde_json::to_value(&next) {
-                broadcast(&update_state, "update.available", payload, BroadcastOpts {
-                    drop_if_slow: true,
-                    ..Default::default()
-                })
+                broadcast(
+                    &update_state,
+                    "update.available",
+                    payload,
+                    BroadcastOpts {
+                        drop_if_slow: true,
+                        ..Default::default()
+                    },
+                )
                 .await;
             }
         }
@@ -4599,12 +4285,15 @@ pub async fn prepare_gateway(
                         .by_provider
                         .iter()
                         .map(|(name, metrics)| {
-                            (name.clone(), moltis_metrics::ProviderTokens {
-                                input_tokens: metrics.input_tokens,
-                                output_tokens: metrics.output_tokens,
-                                completions: metrics.completions,
-                                errors: metrics.errors,
-                            })
+                            (
+                                name.clone(),
+                                moltis_metrics::ProviderTokens {
+                                    input_tokens: metrics.input_tokens,
+                                    output_tokens: metrics.output_tokens,
+                                    completions: metrics.completions,
+                                    errors: metrics.errors,
+                                },
+                            )
                         })
                         .collect();
                     let process_mem = process_rss_bytes();
@@ -4763,10 +4452,15 @@ pub async fn prepare_gateway(
                                 }),
                             ),
                         };
-                        broadcast(&event_state, event_name, payload, BroadcastOpts {
-                            drop_if_slow: true,
-                            ..Default::default()
-                        })
+                        broadcast(
+                            &event_state,
+                            event_name,
+                            payload,
+                            BroadcastOpts {
+                                drop_if_slow: true,
+                                ..Default::default()
+                            },
+                        )
                         .await;
                     },
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
@@ -4821,10 +4515,15 @@ pub async fn prepare_gateway(
                             continue;
                         }
                         if let Ok(payload) = serde_json::to_value(&entry) {
-                            broadcast(&log_state, "logs.entry", payload, BroadcastOpts {
-                                drop_if_slow: true,
-                                ..Default::default()
-                            })
+                            broadcast(
+                                &log_state,
+                                "logs.entry",
+                                payload,
+                                BroadcastOpts {
+                                    drop_if_slow: true,
+                                    ..Default::default()
+                                },
+                            )
                             .await;
                         }
                     },
@@ -6684,21 +6383,27 @@ mod tests {
             "https://localhost:49494".to_string(),
             "https://m4max.local:49494".to_string(),
         ]);
-        assert_eq!(lines, vec![
-            "passkey origin: https://localhost:49494",
-            "passkey origin: https://m4max.local:49494",
-        ]);
+        assert_eq!(
+            lines,
+            vec![
+                "passkey origin: https://localhost:49494",
+                "passkey origin: https://m4max.local:49494",
+            ]
+        );
     }
 
     #[test]
     fn startup_setup_code_lines_adds_spacers() {
         let lines = startup_setup_code_lines("493413");
-        assert_eq!(lines, vec![
-            "",
-            "setup code: 493413",
-            "enter this code to set your password or register a passkey",
-            "",
-        ]);
+        assert_eq!(
+            lines,
+            vec![
+                "",
+                "setup code: 493413",
+                "enter this code to set your password or register a passkey",
+                "",
+            ]
+        );
     }
 
     #[test]
@@ -6726,13 +6431,16 @@ mod tests {
             ("OPENAI_API_KEY".to_string(), "config-openai".to_string()),
             ("BRAVE_API_KEY".to_string(), "config-brave".to_string()),
         ]);
-        let merged = merge_env_overrides(&base, vec![
-            ("OPENAI_API_KEY".to_string(), "db-openai".to_string()),
-            (
-                "PERPLEXITY_API_KEY".to_string(),
-                "db-perplexity".to_string(),
-            ),
-        ]);
+        let merged = merge_env_overrides(
+            &base,
+            vec![
+                ("OPENAI_API_KEY".to_string(), "db-openai".to_string()),
+                (
+                    "PERPLEXITY_API_KEY".to_string(),
+                    "db-perplexity".to_string(),
+                ),
+            ],
+        );
         assert_eq!(
             merged.get("OPENAI_API_KEY").map(String::as_str),
             Some("config-openai")

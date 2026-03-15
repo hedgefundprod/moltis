@@ -37,6 +37,9 @@ bytemuck               = { workspace = true }
 chrono                 = { features = ["serde"], workspace = true }
 directories.workspace  = true
 futures                = { workspace = true }
+lancedb                = "0.26.2"
+arrow-array            = "57.2"
+arrow-schema           = "57.2"
 llama-cpp-2            = { optional = true, workspace = true }
 moltis-agents          = { workspace = true }
 moltis-common          = { workspace = true }

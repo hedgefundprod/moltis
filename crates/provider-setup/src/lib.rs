@@ -12,6 +12,7 @@ use secrecy::{ExposeSecret, Secret};
 use {
     async_trait::async_trait,
     serde_json::{Map, Value},
+    sqlx::SqlitePool,
     tokio::sync::{OnceCell, RwLock},
     tracing::{debug, info, warn},
 };
@@ -28,6 +29,297 @@ use {
 };
 
 use moltis_service_traits::{ProviderSetupService, ServiceError, ServiceResult};
+
+pub fn env_value_with_overrides(
+    env_overrides: &HashMap<String, String>,
+    key: &str,
+) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            env_overrides
+                .get(key)
+                .cloned()
+                .filter(|value| !value.trim().is_empty())
+        })
+}
+
+async fn ollama_has_model(base_url: &str, model: &str) -> bool {
+    let url = format!("{}/api/tags", base_url.trim_end_matches('/'));
+    let response = match reqwest::Client::new().get(url).send().await {
+        Ok(resp) => resp,
+        Err(_) => return false,
+    };
+    if !response.status().is_success() {
+        return false;
+    }
+    let value: Value = match response.json().await {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    value
+        .get("models")
+        .and_then(|m| m.as_array())
+        .map(|models| {
+            models.iter().any(|m| {
+                let name = m.get("name").and_then(|n| n.as_str()).unwrap_or_default();
+                name == model || name.starts_with(&format!("{model}:"))
+            })
+        })
+        .unwrap_or(false)
+}
+
+pub async fn ensure_ollama_model(base_url: &str, model: &str) {
+    if ollama_has_model(base_url, model).await {
+        return;
+    }
+
+    warn!(
+        model = %model,
+        base_url = %base_url,
+        "memory: missing Ollama embedding model, attempting auto-pull"
+    );
+
+    let url = format!("{}/api/pull", base_url.trim_end_matches('/'));
+    let pull = reqwest::Client::new()
+        .post(url)
+        .json(&serde_json::json!({ "name": model, "stream": false }))
+        .send()
+        .await;
+
+    match pull {
+        Ok(resp) if resp.status().is_success() => {
+            info!(model = %model, "memory: Ollama model pull complete");
+        },
+        Ok(resp) => {
+            warn!(
+                model = %model,
+                status = %resp.status(),
+                "memory: Ollama model pull failed"
+            );
+        },
+        Err(e) => {
+            warn!(model = %model, error = %e, "memory: Ollama model pull request failed");
+        },
+    }
+}
+
+pub fn resolved_memory_backend(config: &moltis_config::MoltisConfig) -> String {
+    config
+        .memory
+        .backend
+        .clone()
+        .unwrap_or_else(|| "builtin".to_string())
+}
+
+pub fn resolved_lancedb_path(
+    config: &moltis_config::MoltisConfig,
+    data_dir: &Path,
+    memory_backend: &str,
+) -> Option<PathBuf> {
+    if memory_backend == "lancedb" {
+        Some(
+            config
+                .memory
+                .lancedb
+                .path
+                .clone()
+                .map(PathBuf::from)
+                .unwrap_or_else(|| moltis_memory::runtime::default_lancedb_path(data_dir)),
+        )
+    } else {
+        None
+    }
+}
+
+pub async fn build_memory_manager_from_pool(
+    config: &moltis_config::MoltisConfig,
+    data_dir: &Path,
+    effective_providers: &ProvidersConfig,
+    runtime_env_overrides: &HashMap<String, String>,
+    sqlite_pool: SqlitePool,
+) -> moltis_memory::manager::MemoryManager {
+    let memory_backend = resolved_memory_backend(config);
+    let memory_config =
+        moltis_memory::runtime::build_runtime_config(data_dir, memory_backend.clone());
+    let lancedb_path = resolved_lancedb_path(config, data_dir, &memory_backend);
+    let store = moltis_memory::runtime::build_store_with_fallback(
+        &memory_backend,
+        sqlite_pool,
+        lancedb_path,
+    )
+    .await;
+
+    if let Some(embedder) =
+        build_memory_embedder(config, effective_providers, runtime_env_overrides).await
+    {
+        moltis_memory::manager::MemoryManager::new(memory_config, store, embedder)
+    } else {
+        moltis_memory::manager::MemoryManager::keyword_only(memory_config, store)
+    }
+}
+
+pub async fn build_memory_embedder(
+    config: &moltis_config::MoltisConfig,
+    effective_providers: &ProvidersConfig,
+    runtime_env_overrides: &HashMap<String, String>,
+) -> Option<Box<dyn moltis_memory::embeddings::EmbeddingProvider>> {
+    let mut embedding_providers: Vec<(
+        String,
+        Box<dyn moltis_memory::embeddings::EmbeddingProvider>,
+    )> = Vec::new();
+
+    let mem_cfg = &config.memory;
+
+    if mem_cfg.disable_rag {
+        info!("memory: RAG disabled via memory.disable_rag=true, using keyword-only search");
+        return None;
+    }
+
+    if let Some(ref provider_name) = mem_cfg.provider {
+        match provider_name.as_str() {
+            "local" => {
+                #[cfg(feature = "local-embeddings")]
+                {
+                    let cache_dir = mem_cfg
+                        .base_url
+                        .as_ref()
+                        .map(PathBuf::from)
+                        .unwrap_or_else(
+                            moltis_memory::embeddings_local::LocalGgufEmbeddingProvider::default_cache_dir,
+                        );
+                    match moltis_memory::embeddings_local::LocalGgufEmbeddingProvider::ensure_model(
+                        cache_dir,
+                    )
+                    .await
+                    {
+                        Ok(path) => {
+                            match moltis_memory::embeddings_local::LocalGgufEmbeddingProvider::new(
+                                path,
+                            ) {
+                                Ok(p) => {
+                                    embedding_providers.push(("local-gguf".into(), Box::new(p)))
+                                },
+                                Err(e) => warn!("memory: failed to load local GGUF model: {e}"),
+                            }
+                        },
+                        Err(e) => warn!("memory: failed to ensure local model: {e}"),
+                    }
+                }
+                #[cfg(not(feature = "local-embeddings"))]
+                warn!("memory: 'local' embedding provider requires the 'local-embeddings' feature");
+            },
+            "ollama" | "custom" | "openai" => {
+                let base_url =
+                    mem_cfg
+                        .base_url
+                        .clone()
+                        .unwrap_or_else(|| match provider_name.as_str() {
+                            "ollama" => "http://localhost:11434".into(),
+                            _ => "https://api.openai.com".into(),
+                        });
+                if provider_name == "ollama" {
+                    let model = mem_cfg.model.as_deref().unwrap_or("nomic-embed-text");
+                    ensure_ollama_model(&base_url, model).await;
+                }
+                let api_key = mem_cfg
+                    .api_key
+                    .as_ref()
+                    .map(|k| k.expose_secret().clone())
+                    .or_else(|| env_value_with_overrides(runtime_env_overrides, "OPENAI_API_KEY"))
+                    .unwrap_or_default();
+                let mut e = moltis_memory::embeddings_openai::OpenAiEmbeddingProvider::new(api_key);
+                if base_url != "https://api.openai.com" {
+                    e = e.with_base_url(base_url);
+                }
+                if let Some(ref model) = mem_cfg.model {
+                    e = e.with_model(
+                        model.clone(),
+                        if provider_name == "ollama" {
+                            768
+                        } else {
+                            1536
+                        },
+                    );
+                }
+                embedding_providers.push((provider_name.clone(), Box::new(e)));
+            },
+            other => warn!("memory: unknown embedding provider '{other}'"),
+        }
+    }
+
+    if embedding_providers.is_empty() {
+        let ollama_ok = reqwest::Client::new()
+            .get("http://localhost:11434/api/tags")
+            .timeout(std::time::Duration::from_secs(2))
+            .send()
+            .await
+            .is_ok();
+        if ollama_ok {
+            ensure_ollama_model("http://localhost:11434", "nomic-embed-text").await;
+            let e = moltis_memory::embeddings_openai::OpenAiEmbeddingProvider::new(String::new())
+                .with_base_url("http://localhost:11434".into())
+                .with_model("nomic-embed-text".into(), 768);
+            embedding_providers.push(("ollama".into(), Box::new(e)));
+            info!("memory: detected Ollama at localhost:11434");
+        }
+    }
+
+    const EMBEDDING_CANDIDATES: &[(&str, &str, &str)] = &[
+        ("openai", "OPENAI_API_KEY", "https://api.openai.com"),
+        ("mistral", "MISTRAL_API_KEY", "https://api.mistral.ai/v1"),
+        (
+            "openrouter",
+            "OPENROUTER_API_KEY",
+            "https://openrouter.ai/api/v1",
+        ),
+        ("groq", "GROQ_API_KEY", "https://api.groq.com/openai"),
+        ("xai", "XAI_API_KEY", "https://api.x.ai"),
+        ("deepseek", "DEEPSEEK_API_KEY", "https://api.deepseek.com"),
+        ("cerebras", "CEREBRAS_API_KEY", "https://api.cerebras.ai/v1"),
+        ("minimax", "MINIMAX_API_KEY", "https://api.minimax.io/v1"),
+        ("moonshot", "MOONSHOT_API_KEY", "https://api.moonshot.ai/v1"),
+        ("venice", "VENICE_API_KEY", "https://api.venice.ai/api/v1"),
+    ];
+
+    for (config_name, env_key, default_base) in EMBEDDING_CANDIDATES {
+        let key = effective_providers
+            .get(config_name)
+            .and_then(|e| e.api_key.as_ref().map(|k| k.expose_secret().clone()))
+            .or_else(|| env_value_with_overrides(runtime_env_overrides, env_key))
+            .filter(|k| !k.is_empty());
+        if let Some(api_key) = key {
+            let base = effective_providers
+                .get(config_name)
+                .and_then(|e| e.base_url.clone())
+                .unwrap_or_else(|| default_base.to_string());
+            let mut e = moltis_memory::embeddings_openai::OpenAiEmbeddingProvider::new(api_key);
+            if base != "https://api.openai.com" {
+                e = e.with_base_url(base);
+            }
+            embedding_providers.push((config_name.to_string(), Box::new(e)));
+        }
+    }
+
+    if embedding_providers.is_empty() {
+        info!("memory: no embedding provider found, using keyword-only search");
+        None
+    } else if embedding_providers.len() == 1 {
+        if let Some((name, provider)) = embedding_providers.into_iter().next() {
+            info!(provider = %name, "memory: using single embedding provider");
+            Some(provider)
+        } else {
+            None
+        }
+    } else {
+        let names: Vec<String> = embedding_providers.iter().map(|(n, _)| n.clone()).collect();
+        info!(providers = ?names, active = %names[0], "memory: fallback chain configured");
+        Some(Box::new(
+            moltis_memory::embeddings_fallback::FallbackEmbeddingProvider::new(embedding_providers),
+        ))
+    }
+}
 
 /// Callback for publishing events to connected clients.
 ///
@@ -229,12 +521,15 @@ impl KeyStore {
             return old_format
                 .into_iter()
                 .map(|(k, v)| {
-                    (k, ProviderConfig {
-                        api_key: Some(v),
-                        base_url: None,
-                        models: Vec::new(),
-                        display_name: None,
-                    })
+                    (
+                        k,
+                        ProviderConfig {
+                            api_key: Some(v),
+                            base_url: None,
+                            models: Vec::new(),
+                            display_name: None,
+                        },
+                    )
                 })
                 .collect();
         }
@@ -1037,10 +1332,6 @@ fn set_provider_enabled_in_config(provider: &str, enabled: bool) -> ServiceResul
 
 fn normalize_provider_name(value: &str) -> String {
     moltis_config::normalize_provider_name(value).unwrap_or_default()
-}
-
-fn env_value_with_overrides(env_overrides: &HashMap<String, String>, key: &str) -> Option<String> {
-    moltis_config::env_value_with_overrides(env_overrides, key)
 }
 
 fn ui_offered_provider_order(config: &ProvidersConfig) -> Vec<String> {
@@ -3193,9 +3484,11 @@ mod tests {
         let mut handles = Vec::new();
         for (provider, key, models) in [
             ("openai", "sk-openai", vec!["gpt-5".to_string()]),
-            ("anthropic", "sk-anthropic", vec![
-                "claude-sonnet-4".to_string(),
-            ]),
+            (
+                "anthropic",
+                "sk-anthropic",
+                vec!["claude-sonnet-4".to_string()],
+            ),
         ] {
             let store = store.clone();
             handles.push(std::thread::spawn(move || {
@@ -3323,12 +3616,13 @@ mod tests {
             .expect("openai-codex should exist");
 
         let mut config = ProvidersConfig::default();
-        config
-            .providers
-            .insert("openai-codex".into(), ProviderEntry {
+        config.providers.insert(
+            "openai-codex".into(),
+            ProviderEntry {
                 enabled: false,
                 ..Default::default()
-            });
+            },
+        );
 
         assert!(!svc.is_provider_configured(&provider, &config));
     }
@@ -3355,10 +3649,13 @@ mod tests {
         store.save("anthropic", "sk-saved").unwrap();
 
         let mut base = ProvidersConfig::default();
-        base.providers.insert("anthropic".into(), ProviderEntry {
-            api_key: Some(Secret::new("sk-config".into())),
-            ..Default::default()
-        });
+        base.providers.insert(
+            "anthropic".into(),
+            ProviderEntry {
+                api_key: Some(Secret::new("sk-config".into())),
+                ..Default::default()
+            },
+        );
         let merged = config_with_saved_keys(&base, &store, &[]);
         let entry = merged.get("anthropic").unwrap();
         // Config key takes precedence over saved key.
@@ -3526,10 +3823,13 @@ mod tests {
             offered: vec!["openai".into()],
             ..ProvidersConfig::default()
         };
-        config.providers.insert("anthropic".into(), ProviderEntry {
-            api_key: Some(Secret::new("sk-test".into())),
-            ..Default::default()
-        });
+        config.providers.insert(
+            "anthropic".into(),
+            ProviderEntry {
+                api_key: Some(Secret::new("sk-test".into())),
+                ..Default::default()
+            },
+        );
         let svc = LiveProviderSetupService::new(registry, config, None);
         let result = svc.available().await.unwrap();
         let arr = result
@@ -3557,13 +3857,16 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let token_store = TokenStore::with_path(dir.path().join("oauth_tokens.json"));
         token_store
-            .save("openai-codex", &OAuthTokens {
-                access_token: Secret::new("token".to_string()),
-                refresh_token: None,
-                id_token: None,
-                account_id: None,
-                expires_at: None,
-            })
+            .save(
+                "openai-codex",
+                &OAuthTokens {
+                    access_token: Secret::new("token".to_string()),
+                    refresh_token: None,
+                    id_token: None,
+                    account_id: None,
+                    expires_at: None,
+                },
+            )
             .expect("save oauth token");
 
         let key_store = KeyStore::with_path(dir.path().join("provider_keys.json"));
@@ -3622,12 +3925,13 @@ mod tests {
             offered: vec!["openai".into()],
             ..ProvidersConfig::default()
         };
-        config
-            .providers
-            .insert("custom-openrouter-ai".into(), ProviderEntry {
+        config.providers.insert(
+            "custom-openrouter-ai".into(),
+            ProviderEntry {
                 enabled: true,
                 ..Default::default()
-            });
+            },
+        );
 
         let registry = Arc::new(RwLock::new(ProviderRegistry::from_env_with_config(
             &ProvidersConfig::default(),
@@ -3936,13 +4240,16 @@ mod tests {
             Some(&home)
         ));
 
-        home.save("github-copilot", &OAuthTokens {
-            access_token: Secret::new("home-token".to_string()),
-            refresh_token: None,
-            id_token: None,
-            account_id: None,
-            expires_at: None,
-        })
+        home.save(
+            "github-copilot",
+            &OAuthTokens {
+                access_token: Secret::new("home-token".to_string()),
+                refresh_token: None,
+                id_token: None,
+                account_id: None,
+                expires_at: None,
+            },
+        )
         .expect("save home token");
 
         assert!(has_oauth_tokens_for_provider(
@@ -4139,17 +4446,23 @@ mod tests {
         let mut empty = ProvidersConfig::default();
         assert!(!has_explicit_provider_settings(&empty));
 
-        empty.providers.insert("openai".into(), ProviderEntry {
-            api_key: Some(Secret::new("sk-test".into())),
-            ..Default::default()
-        });
+        empty.providers.insert(
+            "openai".into(),
+            ProviderEntry {
+                api_key: Some(Secret::new("sk-test".into())),
+                ..Default::default()
+            },
+        );
         assert!(has_explicit_provider_settings(&empty));
 
         let mut model_only = ProvidersConfig::default();
-        model_only.providers.insert("ollama".into(), ProviderEntry {
-            models: vec!["llama3".into()],
-            ..Default::default()
-        });
+        model_only.providers.insert(
+            "ollama".into(),
+            ProviderEntry {
+                models: vec!["llama3".into()],
+                ..Default::default()
+            },
+        );
         assert!(has_explicit_provider_settings(&model_only));
     }
 
@@ -4522,18 +4835,27 @@ mod tests {
     #[test]
     fn existing_custom_provider_for_base_url_prefers_canonical_name() {
         let mut existing = HashMap::new();
-        existing.insert("custom-openrouter-ai".into(), ProviderConfig {
-            base_url: Some("https://openrouter.ai/api/v1".into()),
-            ..Default::default()
-        });
-        existing.insert("custom-openrouter-ai-2".into(), ProviderConfig {
-            base_url: Some("https://OPENROUTER.ai/api/v1/".into()),
-            ..Default::default()
-        });
-        existing.insert("custom-together-ai".into(), ProviderConfig {
-            base_url: Some("https://api.together.ai/v1".into()),
-            ..Default::default()
-        });
+        existing.insert(
+            "custom-openrouter-ai".into(),
+            ProviderConfig {
+                base_url: Some("https://openrouter.ai/api/v1".into()),
+                ..Default::default()
+            },
+        );
+        existing.insert(
+            "custom-openrouter-ai-2".into(),
+            ProviderConfig {
+                base_url: Some("https://OPENROUTER.ai/api/v1/".into()),
+                ..Default::default()
+            },
+        );
+        existing.insert(
+            "custom-together-ai".into(),
+            ProviderConfig {
+                base_url: Some("https://api.together.ai/v1".into()),
+                ..Default::default()
+            },
+        );
 
         assert_eq!(
             existing_custom_provider_for_base_url("https://openrouter.ai/api/v1", &existing),
