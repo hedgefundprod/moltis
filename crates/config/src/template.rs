@@ -88,6 +88,9 @@ auto_generate = true              # Auto-generate local CA and server certificat
 #   base_url  - Override API endpoint
 #   models    - Preferred models shown first (optional)
 #   fetch_models - Discover models from provider API when available (default: true)
+#   fetch_runtime_metadata - Fetch runtime metadata (context/output limits) from provider API when available (default: true)
+#   model_overrides.<model_id>.context_window - Override detected/static context window for a model
+#   model_overrides.<model_id>.max_output_tokens - Override detected output token limit for a model
 #   stream_transport - Streaming transport: "sse", "websocket", or "auto" (default: "sse")
 #   alias     - Custom name for metrics labels (useful for multiple instances)
 
@@ -105,6 +108,10 @@ offered = ["local-llm", "github-copilot", "openai-codex", "openai", "anthropic",
 # api_key = "sk-ant-..."                      # Or set ANTHROPIC_API_KEY env var
 # models = ["claude-sonnet-4-5-20250929"]     # Optional preferred models
 # fetch_models = true                          # Set false to skip remote discovery
+# fetch_runtime_metadata = true                # Set false to skip runtime metadata fetches
+# [providers.anthropic.model_overrides."claude-sonnet-4-5-20250929"]
+# context_window = 200000
+# max_output_tokens = 8192
 # base_url = "https://api.anthropic.com"     # API endpoint
 # alias = "anthropic"                         # Custom name for metrics
 
@@ -114,6 +121,10 @@ offered = ["local-llm", "github-copilot", "openai-codex", "openai", "anthropic",
 # api_key = "sk-..."                          # Or set OPENAI_API_KEY env var
 models = ["gpt-5.3", "gpt-5.2"]              # Preferred models shown first
 # fetch_models = true
+# fetch_runtime_metadata = true
+# [providers.openai.model_overrides."gpt-5.2"]
+# context_window = 128000
+# max_output_tokens = 16384
 # stream_transport = "sse"                     # "sse" | "websocket" | "auto"
 # base_url = "https://api.openai.com/v1"     # API endpoint (change for Azure, etc.)
 # alias = "openai"
@@ -124,6 +135,7 @@ models = ["gpt-5.3", "gpt-5.2"]              # Preferred models shown first
 # api_key = "..."                             # Or set GEMINI_API_KEY / GOOGLE_API_KEY env var
 # models = ["gemini-2.5-flash-preview-05-20", "gemini-2.0-flash"]
 # fetch_models = true
+# fetch_runtime_metadata = true
 # base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
 # alias = "gemini"
 

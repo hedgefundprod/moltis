@@ -626,6 +626,10 @@ impl moltis_service_traits::ModelService for MockModel {
     async fn test(&self, p: Value) -> ServiceResult {
         self.0.call("models.test", p)
     }
+
+    async fn inspect(&self, p: Value) -> ServiceResult {
+        self.0.call("models.inspect", p)
+    }
 }
 
 #[async_trait::async_trait]

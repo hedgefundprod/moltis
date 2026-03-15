@@ -1084,6 +1084,12 @@ impl LlmProvider for OpenAiProvider {
                     .and_then(|v| v.as_u64())
                     .map(|v| v as u32)
                     .unwrap_or_else(|| self.context_window());
+                let max_output_tokens = body
+                    .get("max_output_tokens")
+                    .or_else(|| body.get("max_completion_tokens"))
+                    .or_else(|| body.get("output_token_limit"))
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as u32);
 
                 Ok(ModelMetadata {
                     id: body
@@ -1092,6 +1098,7 @@ impl LlmProvider for OpenAiProvider {
                         .unwrap_or(&self.model)
                         .to_string(),
                     context_length,
+                    max_output_tokens,
                 })
             })
             .await?;

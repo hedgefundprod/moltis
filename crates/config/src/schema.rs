@@ -2161,6 +2161,18 @@ pub enum ProviderStreamTransport {
     Auto,
 }
 
+/// Per-model metadata overrides for a provider.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProviderModelOverride {
+    /// Override the model context window in tokens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u32>,
+    /// Override the model max output tokens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u32>,
+}
+
 /// Configuration for a single LLM provider.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -2189,6 +2201,14 @@ pub struct ProviderEntry {
     /// Whether to fetch provider model catalogs dynamically when available.
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub fetch_models: bool,
+
+    /// Whether to fetch runtime model metadata from the provider API when available.
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub fetch_runtime_metadata: bool,
+
+    /// Per-model metadata overrides.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub model_overrides: HashMap<String, ProviderModelOverride>,
 
     /// Streaming transport for this provider (`sse`, `websocket`, `auto`).
     ///
@@ -2223,6 +2243,8 @@ impl std::fmt::Debug for ProviderEntry {
             .field("base_url", &self.base_url)
             .field("models", &self.models)
             .field("fetch_models", &self.fetch_models)
+            .field("fetch_runtime_metadata", &self.fetch_runtime_metadata)
+            .field("model_overrides", &self.model_overrides)
             .field("stream_transport", &self.stream_transport)
             .field("alias", &self.alias)
             .field("tool_mode", &self.tool_mode)
@@ -2238,6 +2260,8 @@ impl Default for ProviderEntry {
             base_url: None,
             models: Vec::new(),
             fetch_models: true,
+            fetch_runtime_metadata: true,
+            model_overrides: HashMap::new(),
             stream_transport: ProviderStreamTransport::Sse,
             alias: None,
             tool_mode: ToolMode::Auto,

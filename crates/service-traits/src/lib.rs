@@ -878,6 +878,8 @@ pub trait ModelService: Send + Sync {
     async fn detect_supported(&self, params: Value) -> ServiceResult;
     /// Test a single model by sending a probe request.
     async fn test(&self, params: Value) -> ServiceResult;
+    /// Inspect a single model and report resolved runtime metadata.
+    async fn inspect(&self, params: Value) -> ServiceResult;
 }
 
 pub struct NoopModelService;
@@ -916,6 +918,10 @@ impl ModelService for NoopModelService {
 
     async fn test(&self, _params: Value) -> ServiceResult {
         Err(model_service_not_configured_error("models.test"))
+    }
+
+    async fn inspect(&self, _params: Value) -> ServiceResult {
+        Err(model_service_not_configured_error("models.inspect"))
     }
 }
 
@@ -1017,6 +1023,8 @@ impl LogsService for NoopLogsService {
 #[async_trait]
 pub trait ProviderSetupService: Send + Sync {
     async fn available(&self) -> ServiceResult;
+    /// Reload provider config from disk and refresh any derived runtime state.
+    async fn reload_config(&self) -> ServiceResult;
     async fn save_key(&self, params: Value) -> ServiceResult;
     async fn oauth_start(&self, params: Value) -> ServiceResult;
     async fn oauth_complete(&self, params: Value) -> ServiceResult;
@@ -1039,6 +1047,10 @@ pub struct NoopProviderSetupService;
 impl ProviderSetupService for NoopProviderSetupService {
     async fn available(&self) -> ServiceResult {
         Ok(serde_json::json!([]))
+    }
+
+    async fn reload_config(&self) -> ServiceResult {
+        Ok(serde_json::json!({ "ok": true }))
     }
 
     async fn save_key(&self, _p: Value) -> ServiceResult {
