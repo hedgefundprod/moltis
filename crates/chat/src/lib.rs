@@ -2268,6 +2268,76 @@ impl ModelService for LiveModelService {
         Ok(summary)
     }
 
+    async fn inspect(&self, params: Value) -> ServiceResult {
+        let model_id = params
+            .get("modelId")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "missing 'modelId' parameter".to_string())?;
+
+        let (model, provider) = {
+            let reg = self.providers.read().await;
+            let model = reg
+                .list_models_with_reasoning_variants()
+                .into_iter()
+                .find(|m| m.id == model_id)
+                .ok_or_else(|| ServiceError::message(format!("unknown model: {model_id}")))?;
+            let provider = reg.get(model_id).ok_or_else(|| {
+                ServiceError::message(format!("provider not available for model: {model_id}"))
+            })?;
+            (model, provider)
+        };
+
+        let static_context_window = u64::from(provider.context_window());
+        let metadata = provider.model_metadata().await;
+        let (metadata_context_length, metadata_id, metadata_source, runtime_context_window) =
+            match metadata {
+                Ok(meta) => {
+                    let runtime = if meta.context_length > 0 {
+                        u64::from(meta.context_length)
+                    } else {
+                        static_context_window
+                    };
+                    (
+                        Some(u64::from(meta.context_length)),
+                        Some(meta.id.clone()),
+                        Some(
+                            if meta.context_length > 0
+                                && meta.context_length != provider.context_window()
+                            {
+                                "provider_metadata"
+                            } else {
+                                "static_fallback"
+                            }
+                            .to_string(),
+                        ),
+                        runtime,
+                    )
+                },
+                Err(err) => {
+                    debug!(provider = provider.id(), error = %err, "model inspection metadata fetch failed; using static context window");
+                    (
+                        None,
+                        None,
+                        Some("static_fallback".to_string()),
+                        static_context_window,
+                    )
+                },
+            };
+
+        Ok(serde_json::json!({
+            "id": model.id,
+            "displayName": model.display_name,
+            "provider": model.provider,
+            "supportsTools": provider.supports_tools(),
+            "supportsVision": provider.supports_vision(),
+            "staticContextWindow": static_context_window,
+            "runtimeContextWindow": runtime_context_window,
+            "metadataContextLength": metadata_context_length,
+            "metadataId": metadata_id,
+            "metadataSource": metadata_source,
+        }))
+    }
+
     async fn test(&self, params: Value) -> ServiceResult {
         let model_id = params
             .get("modelId")

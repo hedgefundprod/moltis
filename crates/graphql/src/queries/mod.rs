@@ -13,10 +13,10 @@ use crate::{
         AgentIdentity, BoolResult, ChannelInfo, ChannelSendersResult, ChatRawPrompt, CronJob,
         CronRunRecord, CronStatus, ExecApprovalConfig, ExecNodeConfig, HealthInfo, HeartbeatStatus,
         HookInfo, LocalSystemInfo, LogListResult, LogStatus, LogTailResult, McpServer, McpTool,
-        MemoryConfig, MemoryStatus, ModelInfo, NodeDescription, NodeInfo, Project, ProjectContext,
-        ProviderInfo, SecurityScanResult, SecurityStatus, SessionActiveResult, SessionBranch,
-        SessionEntry, SessionShareResult, SkillInfo, SkillRepo, StatusInfo, SttStatus,
-        SystemPresence, TtsStatus, UsageCost, UsageStatus, VoiceConfig, VoicewakeConfig,
+        MemoryConfig, MemoryStatus, ModelInfo, ModelInspection, NodeDescription, NodeInfo, Project,
+        ProjectContext, ProviderInfo, SecurityScanResult, SecurityStatus, SessionActiveResult,
+        SessionBranch, SessionEntry, SessionShareResult, SkillInfo, SkillRepo, StatusInfo,
+        SttStatus, SystemPresence, TtsStatus, UsageCost, UsageStatus, VoiceConfig, VoicewakeConfig,
         VoxtralRequirements,
     },
 };
@@ -611,6 +611,16 @@ impl ModelQuery {
     async fn list_all(&self, ctx: &Context<'_>) -> Result<Vec<ModelInfo>> {
         let s = services!(ctx);
         from_service(s.model.list_all().await)
+    }
+
+    /// Inspect one model and report resolved runtime metadata.
+    async fn inspect(&self, ctx: &Context<'_>, model_id: String) -> Result<ModelInspection> {
+        let s = services!(ctx);
+        from_service(
+            s.model
+                .inspect(serde_json::json!({ "modelId": model_id }))
+                .await,
+        )
     }
 }
 

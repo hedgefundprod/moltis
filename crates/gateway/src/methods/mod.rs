@@ -57,6 +57,7 @@ const READ_METHODS: &[&str] = &[
     "stt.providers",
     "models.list",
     "models.list_all",
+    "models.inspect",
     #[cfg(feature = "agent")]
     "agents.list",
     #[cfg(feature = "agent")]
