@@ -404,6 +404,15 @@ pub struct ChannelSendersResult {
 
 // ── Providers & Models ──────────────────────────────────────────────────────
 
+#[derive(Debug, SimpleObject, serde::Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderModelOverrideInfo {
+    #[serde(default)]
+    pub context_window: Option<u64>,
+    #[serde(default)]
+    pub max_output_tokens: Option<u64>,
+}
+
 #[derive(Debug, SimpleObject, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderInfo {
@@ -417,6 +426,10 @@ pub struct ProviderInfo {
     pub auth_method: Option<String>,
     #[serde(default)]
     pub models: Option<Vec<String>>,
+    #[serde(default)]
+    pub fetch_runtime_metadata: Option<bool>,
+    #[serde(default)]
+    pub model_overrides: Option<std::collections::HashMap<String, ProviderModelOverrideInfo>>,
 }
 
 #[derive(Debug, SimpleObject, Deserialize)]
@@ -461,6 +474,8 @@ pub struct ModelInspection {
     pub runtime_context_window: Option<u64>,
     #[serde(default)]
     pub metadata_context_length: Option<u64>,
+    #[serde(default)]
+    pub max_output_tokens: Option<u64>,
     #[serde(default)]
     pub metadata_id: Option<String>,
     #[serde(default)]

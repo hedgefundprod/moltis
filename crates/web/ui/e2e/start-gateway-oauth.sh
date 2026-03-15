@@ -14,6 +14,7 @@ RUNTIME_ROOT="${MOLTIS_E2E_OAUTH_RUNTIME_DIR:-${REPO_ROOT}/target/e2e-runtime-oa
 CONFIG_DIR="${RUNTIME_ROOT}/config"
 DATA_DIR="${RUNTIME_ROOT}/data"
 HOME_DIR="${RUNTIME_ROOT}/home"
+ORIGINAL_HOME="${HOME:-}"
 
 rm -rf "${RUNTIME_ROOT}"
 mkdir -p "${CONFIG_DIR}" "${DATA_DIR}" "${HOME_DIR}/.config" "${HOME_DIR}/.codex"
@@ -79,6 +80,27 @@ cd "${REPO_ROOT}"
 export MOLTIS_CONFIG_DIR="${CONFIG_DIR}"
 export MOLTIS_DATA_DIR="${DATA_DIR}"
 export MOLTIS_SERVER__PORT="${PORT}"
+# Keep rustup/cargo toolchains available after HOME isolation so
+# fallback rebuilds continue to use the pinned nightly toolchain.
+if [ -z "${RUSTUP_HOME:-}" ] && [ -n "${ORIGINAL_HOME}" ]; then
+	export RUSTUP_HOME="${ORIGINAL_HOME}/.rustup"
+fi
+if [ -z "${CARGO_HOME:-}" ] && [ -n "${ORIGINAL_HOME}" ]; then
+	export CARGO_HOME="${ORIGINAL_HOME}/.cargo"
+fi
+
+run_cargo() {
+	if command -v rustup >/dev/null 2>&1; then
+		local toolchain_bin
+		toolchain_bin="$(dirname "$(rustup which --toolchain nightly-2025-11-30 rustc)")"
+		export PATH="${toolchain_bin}:$PATH"
+		export RUSTC="${toolchain_bin}/rustc"
+		export RUSTDOC="${toolchain_bin}/rustdoc"
+		exec "${toolchain_bin}/cargo" "$@"
+	else
+		exec cargo "+nightly-2025-11-30" "$@"
+	fi
+}
 export HOME="${HOME_DIR}"
 export XDG_CONFIG_HOME="${HOME_DIR}/.config"
 
@@ -107,5 +129,5 @@ fi
 if [ -n "${BINARY}" ]; then
 	exec "${BINARY}" --no-tls --bind 127.0.0.1 --port "${PORT}"
 else
-	exec cargo run --bin moltis -- --no-tls --bind 127.0.0.1 --port "${PORT}"
+	run_cargo run --bin moltis -- --no-tls --bind 127.0.0.1 --port "${PORT}"
 fi

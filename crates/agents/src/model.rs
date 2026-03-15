@@ -444,6 +444,7 @@ pub trait LlmProvider: Send + Sync {
         Ok(ModelMetadata {
             id: self.id().to_string(),
             context_length: self.context_window(),
+            max_output_tokens: None,
         })
     }
 }
@@ -476,6 +477,7 @@ pub struct Usage {
 pub struct ModelMetadata {
     pub id: String,
     pub context_length: u32,
+    pub max_output_tokens: Option<u32>,
 }
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]

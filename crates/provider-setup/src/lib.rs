@@ -1679,6 +1679,26 @@ impl LiveProviderSetupService {
             .clone()
     }
 
+    async fn reload_config_from_disk(&self) -> ServiceResult {
+        let providers = moltis_config::discover_and_load().providers;
+        {
+            let mut cfg = self.config.lock().unwrap_or_else(|e| e.into_inner());
+            *cfg = providers;
+        }
+        let effective = self.effective_config();
+        let new_registry = self.build_registry(&effective);
+        let provider_summary = new_registry.provider_summary();
+        let model_count = new_registry.list_models().len();
+        let mut reg = self.registry.write().await;
+        *reg = new_registry;
+        info!(
+            provider_summary = %provider_summary,
+            models = model_count,
+            "provider setup config reloaded from disk"
+        );
+        Ok(serde_json::json!({ "ok": true }))
+    }
+
     fn set_provider_enabled_in_memory(&self, provider: &str, enabled: bool) {
         let mut cfg = self.config.lock().unwrap_or_else(|e| e.into_inner());
         cfg.providers
@@ -1976,6 +1996,23 @@ impl ProviderSetupService for LiveProviderSetupService {
                     .unwrap_or_default();
                 let model = models.first().cloned();
 
+                let config_entry = active_config.get(provider.name);
+                let model_overrides = config_entry.map(|entry| {
+                    entry
+                        .model_overrides
+                        .iter()
+                        .map(|(model, override_cfg)| {
+                            (
+                                model.clone(),
+                                serde_json::json!({
+                                    "contextWindow": override_cfg.context_window,
+                                    "maxOutputTokens": override_cfg.max_output_tokens,
+                                }),
+                            )
+                        })
+                        .collect::<Map<String, Value>>()
+                }).unwrap_or_default();
+
                 Some((
                     offered_rank.get(&normalized_name).copied(),
                     known_idx,
@@ -1990,6 +2027,8 @@ impl ProviderSetupService for LiveProviderSetupService {
                         "model": model,
                         "requiresModel": provider.requires_model,
                         "keyOptional": provider.key_optional,
+                        "fetchRuntimeMetadata": config_entry.map(|entry| entry.fetch_runtime_metadata).unwrap_or(true),
+                        "modelOverrides": model_overrides,
                     }),
                 ))
             })
@@ -2009,6 +2048,24 @@ impl ProviderSetupService for LiveProviderSetupService {
             let models = normalize_model_list(config.models.clone());
             let model = models.first().cloned();
 
+            let config_entry = active_config.get(&name);
+            let model_overrides = config_entry
+                .map(|entry| {
+                    entry
+                        .model_overrides
+                        .iter()
+                        .map(|(model, override_cfg)| {
+                            (
+                                model.clone(),
+                                serde_json::json!({
+                                    "contextWindow": override_cfg.context_window,
+                                    "maxOutputTokens": override_cfg.max_output_tokens,
+                                }),
+                            )
+                        })
+                        .collect::<Map<String, Value>>()
+                })
+                .unwrap_or_default();
             providers.push((
                 None,
                 known_count, // sort after all known providers
@@ -2024,6 +2081,8 @@ impl ProviderSetupService for LiveProviderSetupService {
                     "requiresModel": true,
                     "keyOptional": false,
                     "isCustom": true,
+                    "fetchRuntimeMetadata": config_entry.map(|entry| entry.fetch_runtime_metadata).unwrap_or(true),
+                    "modelOverrides": model_overrides,
                 }),
             ));
         }
@@ -2069,6 +2128,10 @@ impl ProviderSetupService for LiveProviderSetupService {
             .collect();
 
         Ok(Value::Array(providers))
+    }
+
+    async fn reload_config(&self) -> ServiceResult {
+        self.reload_config_from_disk().await
     }
 
     async fn save_key(&self, params: Value) -> ServiceResult {

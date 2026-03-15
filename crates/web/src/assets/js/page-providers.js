@@ -191,8 +191,59 @@ function groupProviderRows(models, metaMap) {
 	return result;
 }
 
+async function saveProviderMetadata(provider, fetchRuntimeMetadata, overrides) {
+	var res = await fetch("/api/providers/metadata", {
+		method: "PUT",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			provider,
+			fetch_runtime_metadata: fetchRuntimeMetadata,
+			model_overrides: overrides,
+		}),
+	});
+	if (!res.ok) {
+		var body = await res.json().catch(() => ({}));
+		throw new Error(body?.error || t("providers:failedToSaveMetadata"));
+	}
+	return res.json().catch(() => ({}));
+}
+
+function normalizeMetadataOverrideInputs(models, edits) {
+	var payload = {};
+	for (var model of models) {
+		var current = edits[model.id] || {};
+		var contextWindow = (current.contextWindow || "").trim();
+		var maxOutputTokens = (current.maxOutputTokens || "").trim();
+		if (!contextWindow && !maxOutputTokens) continue;
+		payload[model.id] = {
+			context_window: contextWindow ? Number(contextWindow) : null,
+			max_output_tokens: maxOutputTokens ? Number(maxOutputTokens) : null,
+		};
+	}
+	return payload;
+}
+
+function modelOverrideFor(meta, model) {
+	return meta?.modelOverrides?.[model.id] || meta?.modelOverrides?.[String(model.id).split("::").pop()] || {};
+}
+
 function ProviderSection(props) {
 	var group = props.group;
+	var providerMeta = providerMetaSig.value.get(group.provider) || {};
+	var metadataEdits = {};
+	for (var model of group.models) {
+		var existingOverride = modelOverrideFor(providerMeta, model);
+		metadataEdits[model.id] = {
+			contextWindow:
+				existingOverride?.contextWindow === null || existingOverride?.contextWindow === undefined
+					? ""
+					: String(existingOverride.contextWindow),
+			maxOutputTokens:
+				existingOverride?.maxOutputTokens === null || existingOverride?.maxOutputTokens === undefined
+					? ""
+					: String(existingOverride.maxOutputTokens),
+		};
+	}
 
 	function onDeleteProvider() {
 		if (deletingProvider.value) return;
@@ -239,6 +290,50 @@ function ProviderSection(props) {
 		openModelSelectorForProvider(group.provider, group.providerDisplayName);
 	}
 
+	async function onToggleFetchRuntimeMetadata(event) {
+		var nextValue = !!event.currentTarget.checked;
+		try {
+			providerActionError.value = "";
+			await saveProviderMetadata(group.provider, nextValue, normalizeMetadataOverrideInputs(group.models, metadataEdits));
+			await fetchProviders();
+		} catch (err) {
+			providerActionError.value = err?.message || t("providers:failedToSaveMetadata");
+		}
+	}
+
+	async function onSaveMetadata() {
+		try {
+			providerActionError.value = "";
+			await saveProviderMetadata(
+				group.provider,
+				providerMeta.fetchRuntimeMetadata !== false,
+				normalizeMetadataOverrideInputs(group.models, metadataEdits),
+			);
+			await fetchProviders();
+		} catch (err) {
+			providerActionError.value = err?.message || t("providers:failedToSaveMetadata");
+		}
+	}
+
+	async function onInspectModel(model) {
+		try {
+			providerActionError.value = "";
+			var res = await sendRpc("models.inspect", { modelId: model.id });
+			if (!res?.ok) throw new Error(res?.error?.message || t("providers:failedToInspectModel"));
+			var payload = res.payload || {};
+			var details = [
+				`${t("providers:metadata.source")}: ${payload.metadataSource || "-"}`,
+				`${t("providers:metadata.staticContext")}: ${payload.staticContextWindow || "-"}`,
+				`${t("providers:metadata.runtimeContext")}: ${payload.runtimeContextWindow || "-"}`,
+				`${t("providers:metadata.maxOutputTokens")}: ${payload.maxOutputTokens || "-"}`,
+				`${t("providers:metadata.metadataId")}: ${payload.metadataId || "-"}`,
+			].join("\n");
+			window.alert(details);
+		} catch (err) {
+			providerActionError.value = err?.message || t("providers:failedToInspectModel");
+		}
+	}
+
 	return html`<div id=${`provider-${group.provider}`} class="max-w-form py-1">
 		<div class="flex items-center justify-between gap-3">
 			<div class="flex items-center gap-2 min-w-0">
@@ -259,29 +354,63 @@ function ProviderSection(props) {
 			</div>
 		</div>
 		<div class="mt-2 border-b border-[var(--border)]"></div>
-		${
-			group.models.length === 0
-				? html`<div class="mt-2 text-xs text-[var(--muted)]">${t("providers:noActiveModels")}</div>`
-				: html`<div class="mt-2 flex flex-col gap-2">
-					${group.models.map(
-						(model) => html`<div key=${model.id} class="flex items-start justify-between gap-3 py-1">
-							<div class="min-w-0 flex-1">
-								<div class="flex items-center gap-2 min-w-0">
-									<div class="text-sm font-medium text-[var(--text-strong)] truncate">${model.displayName || model.id}</div>
-									${model.unsupported ? html`<span class="provider-item-badge warning" title=${model.unsupportedReason || t("providers:modelNotSupported")}>${t("providers:unsupported")}</span>` : null}
-									${model.supportsTools ? null : html`<span class="provider-item-badge warning">${t("providers:chatOnly")}</span>`}
-									${model.disabled ? html`<span class="provider-item-badge muted">${t("providers:disabled")}</span>` : null}
+		<div class="mt-2 rounded-md border border-[var(--border)] bg-[var(--surface)] p-3" data-testid=${`runtime-metadata-${group.provider}`}>
+			<div class="flex items-center justify-between gap-3">
+				<div>
+					<div class="text-sm font-medium text-[var(--text-strong)]">${t("providers:runtimeMetadata.title")}</div>
+					<div class="text-xs text-[var(--muted)]">${t("providers:runtimeMetadata.description")}</div>
+				</div>
+				<label class="text-xs text-[var(--muted)] flex items-center gap-2">
+					<input type="checkbox" checked=${providerMeta.fetchRuntimeMetadata !== false} onChange=${onToggleFetchRuntimeMetadata} />
+					<span>${t("providers:runtimeMetadata.fetchToggle")}</span>
+				</label>
+			</div>
+			${group.models.length > 0
+				? html`<div class="mt-2 flex flex-col gap-2">
+					${group.models.map((model) => html`<details key=${`meta-${model.id}`} class="rounded-md border border-[var(--border)]" open=${!!metadataEdits[model.id].contextWindow || !!metadataEdits[model.id].maxOutputTokens}>
+						<summary class="cursor-pointer p-2">
+							<div class="flex items-start justify-between gap-3">
+								<div class="min-w-0 flex-1">
+									<div class="flex items-center gap-2 min-w-0 flex-wrap">
+										<div class="text-sm font-medium text-[var(--text-strong)] truncate">${model.displayName || model.id}</div>
+										${model.unsupported ? html`<span class="provider-item-badge warning" title=${model.unsupportedReason || t("providers:modelNotSupported")}>${t("providers:unsupported")}</span>` : null}
+										${model.supportsTools ? null : html`<span class="provider-item-badge warning">${t("providers:chatOnly")}</span>`}
+										${model.disabled ? html`<span class="provider-item-badge muted">${t("providers:disabled")}</span>` : null}
+									</div>
+									${model.createdAt ? html`<time class="mt-1 text-xs text-[var(--muted)] opacity-60 block" data-epoch-ms=${model.createdAt * 1000} data-format="year-month"></time>` : null}
 								</div>
-								<div class="mt-1 text-xs text-[var(--muted)] font-mono opacity-75">${model.id}</div>
-								${model.createdAt ? html`<time class="mt-0.5 text-xs text-[var(--muted)] opacity-60 block" data-epoch-ms=${model.createdAt * 1000} data-format="year-month"></time>` : null}
 							</div>
-							<button class="provider-btn provider-btn-secondary provider-btn-sm" onClick=${() => onToggleModel(model)}>
-								${model.disabled ? t("common:actions.enable") : t("common:actions.disable")}
-							</button>
-						</div>`,
-					)}
+						</summary>
+						<div class="px-2 pb-2 pt-0 border-t border-[var(--border)]">
+							<div class="mt-2 text-[11px] text-[var(--muted)] font-mono truncate">${model.id}</div>
+							<div class="mt-2 flex gap-2 justify-end">
+								<button class="provider-btn provider-btn-secondary provider-btn-sm" onClick=${() => onInspectModel(model)}>${t("providers:runtimeMetadata.inspect")}</button>
+								<button class="provider-btn provider-btn-secondary provider-btn-sm" onClick=${() => onToggleModel(model)}>
+									${model.disabled ? t("common:actions.enable") : t("common:actions.disable")}
+								</button>
+							</div>
+							<div class="mt-2 grid gap-2" style="grid-template-columns:repeat(2,minmax(0,1fr));">
+								<label class="text-xs text-[var(--muted)] flex flex-col gap-1">
+									<span>${t("providers:runtimeMetadata.contextWindow")}</span>
+									<input data-testid=${`metadata-context-${model.id}`} class="input" type="number" min="1" value=${metadataEdits[model.id].contextWindow} onInput=${(e) => {
+										metadataEdits[model.id].contextWindow = e.currentTarget.value;
+									}} />
+								</label>
+								<label class="text-xs text-[var(--muted)] flex flex-col gap-1">
+									<span>${t("providers:runtimeMetadata.maxOutputTokens")}</span>
+									<input data-testid=${`metadata-max-output-${model.id}`} class="input" type="number" min="1" value=${metadataEdits[model.id].maxOutputTokens} onInput=${(e) => {
+										metadataEdits[model.id].maxOutputTokens = e.currentTarget.value;
+									}} />
+								</label>
+							</div>
+						</div>
+					</details>`)}
 				</div>`
-		}
+				: html`<div class="mt-2 text-xs text-[var(--muted)]">${t("providers:noActiveModels")}</div>`}
+			<div class="mt-2 border-t border-[var(--border)] px-0 pt-2 flex justify-end">
+				<button class="provider-btn provider-btn-secondary provider-btn-sm" onClick=${onSaveMetadata}>${t("common:actions.save")}</button>
+			</div>
+		</div>
 	</div>`;
 }
 

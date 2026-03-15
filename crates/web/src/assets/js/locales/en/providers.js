@@ -9,6 +9,9 @@ export default {
 	failedToDetectModels: "Failed to detect model availability.",
 	failedToDeleteProvider: "Failed to delete provider.",
 	failedToUpdateModel: "Failed to update model state.",
+
+	failedToSaveMetadata: "Failed to save runtime metadata settings.",
+	failedToInspectModel: "Failed to inspect model metadata.",
 	modelDetectionFailed: "Model detection failed.",
 	detectAllModels: "Detect All Models",
 	detectingModels: "Detecting Models\u2026",
@@ -56,6 +59,21 @@ export default {
 		chooseModel: "Choose a model to use",
 		noMatches: "No models match your search.",
 		testing: "Testing\u2026",
+	},
+	runtimeMetadata: {
+		title: "Runtime metadata",
+		description: "Configure whether runtime metadata is fetched from the provider and apply per-model overrides.",
+		fetchToggle: "Fetch runtime metadata from provider API",
+		inspect: "Inspect",
+		contextWindow: "Context window override",
+		maxOutputTokens: "Max output tokens override",
+	},
+	metadata: {
+		source: "Source",
+		staticContext: "Static context",
+		runtimeContext: "Runtime context",
+		maxOutputTokens: "Max output tokens",
+		metadataId: "Metadata id",
 	},
 	preferredModels: {
 		button: "Preferred Models",

@@ -2198,16 +2198,16 @@ pub enum ProviderStreamTransport {
     Auto,
 }
 
-/// Per-model runtime metadata overrides for a provider.
+/// Per-model metadata overrides for a provider.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub struct ProviderModelRuntimeOverride {
-    /// Override the model context window used by compaction and diagnostics.
+pub struct ProviderModelOverride {
+    /// Override the model context window in tokens.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub context_window: Option<u64>,
-    /// Optional override for the model's maximum output token budget.
+    pub context_window: Option<u32>,
+    /// Override the model max output tokens.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_output_tokens: Option<u64>,
+    pub max_output_tokens: Option<u32>,
 }
 
 /// Configuration for a single LLM provider.
@@ -2243,9 +2243,9 @@ pub struct ProviderEntry {
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub fetch_runtime_metadata: bool,
 
-    /// Optional per-model runtime metadata overrides keyed by raw model id.
+    /// Per-model metadata overrides.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub model_overrides: HashMap<String, ProviderModelRuntimeOverride>,
+    pub model_overrides: HashMap<String, ProviderModelOverride>,
 
     /// Streaming transport for this provider (`sse`, `websocket`, `auto`).
     ///
