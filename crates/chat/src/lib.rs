@@ -25,7 +25,7 @@ use moltis_config::{MessageQueueMode, ToolMode};
 use {
     moltis_agents::{
         AgentRunError, ChatMessage, ContentPart, UserContent,
-        model::{StreamEvent, values_to_chat_messages},
+        model::{LlmProvider, StreamEvent, values_to_chat_messages},
         multimodal::parse_data_uri,
         prompt::{
             PromptHostRuntimeContext, PromptNodeInfo, PromptNodesRuntimeContext,
@@ -274,6 +274,17 @@ struct SessionTokenUsage {
 }
 
 #[must_use]
+async fn provider_runtime_context_window(provider: &Arc<dyn LlmProvider>) -> u64 {
+    match provider.model_metadata().await {
+        Ok(meta) if meta.context_length > 0 => u64::from(meta.context_length),
+        Ok(_) => u64::from(provider.context_window()),
+        Err(err) => {
+            tracing::debug!(provider = provider.id(), error = %err, "failed to fetch runtime model metadata; falling back to static context window");
+            u64::from(provider.context_window())
+        },
+    }
+}
+
 fn session_token_usage_from_messages(messages: &[Value]) -> SessionTokenUsage {
     let session_input_tokens = messages
         .iter()
@@ -590,7 +601,7 @@ async fn run_single_probe(
     model_id: String,
     display_name: String,
     provider_name: String,
-    provider: Arc<dyn moltis_agents::model::LlmProvider>,
+    provider: Arc<dyn LlmProvider>,
     limiter: Arc<Semaphore>,
     provider_limiter: Arc<ProbeProviderLimiter>,
     rate_limiter: Arc<ProbeRateLimiter>,
@@ -1164,7 +1175,7 @@ fn resolve_channel_runtime_context(
 
 async fn build_prompt_runtime_context(
     state: &Arc<dyn ChatRuntime>,
-    provider: &Arc<dyn moltis_agents::model::LlmProvider>,
+    provider: &Arc<dyn LlmProvider>,
     session_key: &str,
     session_entry: Option<&SessionEntry>,
 ) -> PromptRuntimeContext {
@@ -1774,26 +1785,39 @@ impl ModelService for LiveModelService {
                 .filter(|m| disabled.unsupported_info(&m.id).is_none()),
         );
         info!(model_count = prioritized.len(), "models.list response");
-        let models: Vec<_> = prioritized
+        let model_entries: Vec<_> = prioritized
             .iter()
             .copied()
             .map(|m| {
-                let supports_tools = reg.get(&m.id).is_some_and(|p| p.supports_tools());
+                let provider = reg.get(&m.id);
+                let supports_tools = provider.as_ref().is_some_and(|p| p.supports_tools());
                 let preferred = Self::priority_rank(&order, m) != usize::MAX;
-                serde_json::json!({
-                    "id": m.id,
-                    "provider": m.provider,
-                    "displayName": m.display_name,
-                    "supportsTools": supports_tools,
-                    "preferred": preferred,
-                    "createdAt": m.created_at,
-                    "unsupported": false,
-                    "unsupportedReason": Value::Null,
-                    "unsupportedProvider": Value::Null,
-                    "unsupportedUpdatedAt": Value::Null,
-                })
+                (m.clone(), supports_tools, preferred, provider)
             })
             .collect();
+        drop(reg);
+
+        let mut models = Vec::with_capacity(model_entries.len());
+        for (m, supports_tools, preferred, provider) in model_entries {
+            let context_window = if let Some(provider) = provider {
+                Some(provider_runtime_context_window(&provider).await)
+            } else {
+                None
+            };
+            models.push(serde_json::json!({
+                "id": m.id,
+                "provider": m.provider,
+                "displayName": m.display_name,
+                "supportsTools": supports_tools,
+                "preferred": preferred,
+                "createdAt": m.created_at,
+                "contextWindow": context_window,
+                "unsupported": false,
+                "unsupportedReason": Value::Null,
+                "unsupportedProvider": Value::Null,
+                "unsupportedUpdatedAt": Value::Null,
+            }));
+        }
         Ok(serde_json::json!(models))
     }
 
@@ -1809,26 +1833,47 @@ impl ModelService for LiveModelService {
                 .filter(|m| moltis_providers::is_chat_capable_model(&m.id)),
         );
         info!(model_count = prioritized.len(), "models.list_all response");
-        let models: Vec<_> = prioritized
+        let model_entries: Vec<_> = prioritized
             .iter()
             .copied()
             .map(|m| {
-                let supports_tools = reg.get(&m.id).is_some_and(|p| p.supports_tools());
-                let unsupported = disabled.unsupported_info(&m.id);
-                serde_json::json!({
-                    "id": m.id,
-                    "provider": m.provider,
-                    "displayName": m.display_name,
-                    "supportsTools": supports_tools,
-                    "createdAt": m.created_at,
-                    "disabled": disabled.is_disabled(&m.id),
-                    "unsupported": unsupported.is_some(),
-                    "unsupportedReason": unsupported.map(|u| u.detail.clone()),
-                    "unsupportedProvider": unsupported.and_then(|u| u.provider.clone()),
-                    "unsupportedUpdatedAt": unsupported.map(|u| u.updated_at_ms),
-                })
+                let provider = reg.get(&m.id);
+                let supports_tools = provider.as_ref().is_some_and(|p| p.supports_tools());
+                let unsupported = disabled.unsupported_info(&m.id).cloned();
+                let is_disabled = disabled.is_disabled(&m.id);
+                (
+                    m.clone(),
+                    supports_tools,
+                    unsupported,
+                    is_disabled,
+                    provider,
+                )
             })
             .collect();
+        drop(reg);
+        drop(disabled);
+
+        let mut models = Vec::with_capacity(model_entries.len());
+        for (m, supports_tools, unsupported, is_disabled, provider) in model_entries {
+            let context_window = if let Some(provider) = provider {
+                Some(provider_runtime_context_window(&provider).await)
+            } else {
+                None
+            };
+            models.push(serde_json::json!({
+                "id": m.id,
+                "provider": m.provider,
+                "displayName": m.display_name,
+                "supportsTools": supports_tools,
+                "createdAt": m.created_at,
+                "contextWindow": context_window,
+                "disabled": is_disabled,
+                "unsupported": unsupported.is_some(),
+                "unsupportedReason": unsupported.as_ref().map(|u| u.detail.clone()),
+                "unsupportedProvider": unsupported.as_ref().and_then(|u| u.provider.clone()),
+                "unsupportedUpdatedAt": unsupported.as_ref().map(|u| u.updated_at_ms),
+            }));
+        }
         Ok(serde_json::json!(models))
     }
 
@@ -2711,7 +2756,7 @@ impl LiveChatService {
         &self,
         session_key: &str,
         history: &[Value],
-    ) -> error::Result<Arc<dyn moltis_agents::model::LlmProvider>> {
+    ) -> error::Result<Arc<dyn LlmProvider>> {
         let reg = self.providers.read().await;
         let session_model = self
             .session_metadata
@@ -3266,7 +3311,7 @@ impl ChatService for LiveChatService {
         };
         let model_id = explicit_model.or(session_model.as_deref());
 
-        let provider: Arc<dyn moltis_agents::model::LlmProvider> = {
+        let provider: Arc<dyn LlmProvider> = {
             let reg = self.providers.read().await;
             let primary = if let Some(id) = model_id {
                 reg.get(id).ok_or_else(|| {
@@ -3513,7 +3558,7 @@ impl ChatService for LiveChatService {
             .map(String::from);
         // Auto-compact when the next request is likely to exceed 95% of the
         // model context window.
-        let context_window = provider.context_window() as u64;
+        let context_window = provider_runtime_context_window(&provider).await;
         let token_usage = session_token_usage_from_messages(&history);
         let estimated_next_input = token_usage
             .current_request_input_tokens
@@ -3943,7 +3988,7 @@ impl ChatService for LiveChatService {
         };
 
         // Resolve provider.
-        let provider: Arc<dyn moltis_agents::model::LlmProvider> = {
+        let provider: Arc<dyn LlmProvider> = {
             let reg = self.providers.read().await;
             if let Some(id) = explicit_model {
                 reg.get(id)
@@ -4616,14 +4661,19 @@ impl ChatService for LiveChatService {
             usage.current_request_input_tokens + usage.current_request_output_tokens;
 
         // Context window from the session's provider
-        let context_window = {
+        let provider_for_context = {
             let reg = self.providers.read().await;
             let session_model = session_entry.as_ref().and_then(|e| e.model.as_deref());
             if let Some(id) = session_model {
-                reg.get(id).map(|p| p.context_window()).unwrap_or(200_000)
+                reg.get(id)
             } else {
-                reg.first().map(|p| p.context_window()).unwrap_or(200_000)
+                reg.first()
             }
+        };
+        let context_window = if let Some(provider) = provider_for_context {
+            provider_runtime_context_window(&provider).await
+        } else {
+            200_000
         };
 
         // Sandbox info
@@ -5933,7 +5983,7 @@ fn install_agent_scoped_memory_tools(
 /// - `Native` — provider handles tool schemas via API (OpenAI function calling, etc.)
 /// - `Text` — tools are described in the prompt; the runner parses tool calls from text
 /// - `Off` — no tools at all
-fn effective_tool_mode(provider: &dyn moltis_agents::model::LlmProvider) -> ToolMode {
+fn effective_tool_mode(provider: &dyn LlmProvider) -> ToolMode {
     match provider.tool_mode() {
         Some(ToolMode::Native) => ToolMode::Native,
         Some(ToolMode::Text) => ToolMode::Text,
@@ -5952,7 +6002,7 @@ async fn run_with_tools(
     state: &Arc<dyn ChatRuntime>,
     model_store: &Arc<RwLock<DisabledModelsStore>>,
     run_id: &str,
-    provider: Arc<dyn moltis_agents::model::LlmProvider>,
+    provider: Arc<dyn LlmProvider>,
     model_id: &str,
     tool_registry: &Arc<RwLock<ToolRegistry>>,
     user_content: &UserContent,
@@ -6759,7 +6809,7 @@ async fn run_with_tools(
 async fn compact_session(
     store: &Arc<SessionStore>,
     session_key: &str,
-    provider: &Arc<dyn moltis_agents::model::LlmProvider>,
+    provider: &Arc<dyn LlmProvider>,
 ) -> error::Result<()> {
     let history = store
         .read(session_key)
@@ -6910,7 +6960,7 @@ async fn run_streaming(
     state: &Arc<dyn ChatRuntime>,
     model_store: &Arc<RwLock<DisabledModelsStore>>,
     run_id: &str,
-    provider: Arc<dyn moltis_agents::model::LlmProvider>,
+    provider: Arc<dyn LlmProvider>,
     model_id: &str,
     user_content: &UserContent,
     provider_name: &str,
@@ -8462,6 +8512,7 @@ mod tests {
 
     struct AutoCompactRegressionProvider {
         context_window: u32,
+        metadata_context_length: Option<u32>,
     }
     #[async_trait]
     impl LlmProvider for StaticProvider {
@@ -8509,6 +8560,13 @@ mod tests {
 
         fn context_window(&self) -> u32 {
             self.context_window
+        }
+
+        async fn model_metadata(&self) -> Result<moltis_agents::model::ModelMetadata> {
+            Ok(moltis_agents::model::ModelMetadata {
+                id: self.id().to_string(),
+                context_length: self.metadata_context_length.unwrap_or(self.context_window),
+            })
         }
 
         fn stream(
@@ -9755,6 +9813,7 @@ mod tests {
             },
             Arc::new(AutoCompactRegressionProvider {
                 context_window: 100,
+                metadata_context_length: None,
             }),
         );
 
@@ -9903,6 +9962,80 @@ mod tests {
 
         assert_eq!(first, Some(STREAM_SERVER_RETRY_DELAY_MS));
         assert_eq!(second, None);
+    }
+
+    #[tokio::test]
+    async fn auto_compact_uses_runtime_model_metadata_for_threshold() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(SessionStore::new(dir.path().to_path_buf()));
+        let pool = sqlite_pool().await;
+        let metadata = Arc::new(SqliteSessionMetadata::new(pool));
+
+        let state: Arc<dyn ChatRuntime> = Arc::new(MockChatRuntime::new());
+        let mut providers = ProviderRegistry::empty();
+        providers.register(
+            moltis_providers::ModelInfo {
+                id: "test::metadata-context".to_string(),
+                provider: "test".to_string(),
+                display_name: "Metadata Context Test".to_string(),
+                created_at: None,
+            },
+            Arc::new(AutoCompactRegressionProvider {
+                context_window: 100,
+                metadata_context_length: Some(1_000),
+            }),
+        );
+
+        let chat = LiveChatService::new(
+            Arc::new(RwLock::new(providers)),
+            Arc::new(RwLock::new(DisabledModelsStore::default())),
+            state,
+            Arc::clone(&store),
+            metadata,
+        );
+
+        let session_key = "main";
+        store
+            .append(
+                session_key,
+                &serde_json::json!({
+                    "role": "assistant",
+                    "content": "existing response",
+                    "requestInputTokens": 94_u64,
+                    "requestOutputTokens": 1_u64
+                }),
+            )
+            .await
+            .expect("seed history");
+
+        let result = chat
+            .send(serde_json::json!({
+                "_session_key": session_key,
+                "text": "hello",
+                "model": "test::metadata-context"
+            }))
+            .await
+            .expect("chat.send should succeed");
+
+        assert!(result.get("runId").and_then(Value::as_str).is_some());
+
+        let history = store.read(session_key).await.expect("history should load");
+        let assistant_messages = history
+            .iter()
+            .filter(|msg| msg.get("role").and_then(Value::as_str) == Some("assistant"))
+            .count();
+        assert_eq!(
+            assistant_messages, 2,
+            "should not compact when runtime metadata reports a much larger context window"
+        );
+        assert!(history.iter().all(|msg| {
+            msg.get("content").and_then(Value::as_str)
+                != Some(
+                    "[Conversation Summary]
+
+summary",
+                )
+        }));
     }
 
     #[tokio::test]
@@ -11679,16 +11812,15 @@ mod tests {
         );
 
         // Pre-populate active tool calls for a session.
-        service
-            .active_tool_calls
-            .write()
-            .await
-            .insert("test-session".into(), vec![ActiveToolCall {
+        service.active_tool_calls.write().await.insert(
+            "test-session".into(),
+            vec![ActiveToolCall {
                 id: "tc_1".into(),
                 name: "bash".into(),
                 arguments: serde_json::json!({}),
                 started_at: 0,
-            }]);
+            }],
+        );
         // Pre-populate active_runs_by_session so abort can find the session.
         let run_id = "test-run".to_string();
         service
