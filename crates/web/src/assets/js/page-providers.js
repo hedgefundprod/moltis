@@ -354,7 +354,7 @@ function ProviderSection(props) {
 			</div>
 		</div>
 		<div class="mt-2 border-b border-[var(--border)]"></div>
-		<div class="mt-3 rounded-md border border-[var(--border)] bg-[var(--surface)] p-3" data-testid=${`runtime-metadata-${group.provider}`}>
+		<div class="mt-2 rounded-md border border-[var(--border)] bg-[var(--surface)] p-3" data-testid=${`runtime-metadata-${group.provider}`}>
 			<div class="flex items-center justify-between gap-3">
 				<div>
 					<div class="text-sm font-medium text-[var(--text-strong)]">${t("providers:runtimeMetadata.title")}</div>
@@ -366,59 +366,52 @@ function ProviderSection(props) {
 				</label>
 			</div>
 			${group.models.length > 0
-				? html`<div class="mt-3 flex flex-col gap-3">
-					${group.models.map((model) => html`<div key=${`meta-${model.id}`} class="rounded-md border border-[var(--border)] p-2">
-						<div class="flex items-center justify-between gap-2">
-							<div class="min-w-0">
-								<div class="text-xs font-medium text-[var(--text-strong)] truncate">${model.displayName || model.id}</div>
-								<div class="text-[11px] text-[var(--muted)] font-mono truncate">${model.id}</div>
+				? html`<div class="mt-2 flex flex-col gap-2">
+					${group.models.map((model) => html`<details key=${`meta-${model.id}`} class="rounded-md border border-[var(--border)]" open=${!!metadataEdits[model.id].contextWindow || !!metadataEdits[model.id].maxOutputTokens}>
+						<summary class="list-none cursor-pointer p-2">
+							<div class="flex items-start justify-between gap-3">
+								<div class="min-w-0 flex-1">
+									<div class="flex items-center gap-2 min-w-0 flex-wrap">
+										<div class="text-sm font-medium text-[var(--text-strong)] truncate">${model.displayName || model.id}</div>
+										${model.unsupported ? html`<span class="provider-item-badge warning" title=${model.unsupportedReason || t("providers:modelNotSupported")}>${t("providers:unsupported")}</span>` : null}
+										${model.supportsTools ? null : html`<span class="provider-item-badge warning">${t("providers:chatOnly")}</span>`}
+										${model.disabled ? html`<span class="provider-item-badge muted">${t("providers:disabled")}</span>` : null}
+									</div>
+									${model.createdAt ? html`<time class="mt-1 text-xs text-[var(--muted)] opacity-60 block" data-epoch-ms=${model.createdAt * 1000} data-format="year-month"></time>` : null}
+								</div>
+								<div class="text-xs text-[var(--muted)] shrink-0">${t("providers:runtimeMetadata.inspect")}</div>
 							</div>
-							<button class="provider-btn provider-btn-secondary provider-btn-sm" onClick=${() => onInspectModel(model)}>${t("providers:runtimeMetadata.inspect")}</button>
+						</summary>
+						<div class="px-2 pb-2 pt-0 border-t border-[var(--border)]">
+							<div class="mt-2 text-[11px] text-[var(--muted)] font-mono truncate">${model.id}</div>
+							<div class="mt-2 flex gap-2 justify-end">
+								<button class="provider-btn provider-btn-secondary provider-btn-sm" onClick=${() => onInspectModel(model)}>${t("providers:runtimeMetadata.inspect")}</button>
+								<button class="provider-btn provider-btn-secondary provider-btn-sm" onClick=${() => onToggleModel(model)}>
+									${model.disabled ? t("common:actions.enable") : t("common:actions.disable")}
+								</button>
+							</div>
+							<div class="mt-2 grid gap-2" style="grid-template-columns:repeat(2,minmax(0,1fr));">
+								<label class="text-xs text-[var(--muted)] flex flex-col gap-1">
+									<span>${t("providers:runtimeMetadata.contextWindow")}</span>
+									<input data-testid=${`metadata-context-${model.id}`} class="input" type="number" min="1" value=${metadataEdits[model.id].contextWindow} onInput=${(e) => {
+										metadataEdits[model.id].contextWindow = e.currentTarget.value;
+									}} />
+								</label>
+								<label class="text-xs text-[var(--muted)] flex flex-col gap-1">
+									<span>${t("providers:runtimeMetadata.maxOutputTokens")}</span>
+									<input data-testid=${`metadata-max-output-${model.id}`} class="input" type="number" min="1" value=${metadataEdits[model.id].maxOutputTokens} onInput=${(e) => {
+										metadataEdits[model.id].maxOutputTokens = e.currentTarget.value;
+									}} />
+								</label>
+							</div>
 						</div>
-						<div class="mt-2 grid gap-2" style="grid-template-columns:repeat(2,minmax(0,1fr));">
-							<label class="text-xs text-[var(--muted)] flex flex-col gap-1">
-								<span>${t("providers:runtimeMetadata.contextWindow")}</span>
-								<input data-testid=${`metadata-context-${model.id}`} class="input" type="number" min="1" value=${metadataEdits[model.id].contextWindow} onInput=${(e) => {
-									metadataEdits[model.id].contextWindow = e.currentTarget.value;
-								}} />
-							</label>
-							<label class="text-xs text-[var(--muted)] flex flex-col gap-1">
-								<span>${t("providers:runtimeMetadata.maxOutputTokens")}</span>
-								<input data-testid=${`metadata-max-output-${model.id}`} class="input" type="number" min="1" value=${metadataEdits[model.id].maxOutputTokens} onInput=${(e) => {
-									metadataEdits[model.id].maxOutputTokens = e.currentTarget.value;
-								}} />
-							</label>
-						</div>
-					</div>`)}
+					</details>`)}
 				</div>`
 				: html`<div class="mt-2 text-xs text-[var(--muted)]">${t("providers:noActiveModels")}</div>`}
-			<div class="mt-3">
+			<div class="sticky bottom-0 mt-3 -mx-3 -mb-3 border-t border-[var(--border)] bg-[var(--surface)] px-3 py-2 flex justify-end">
 				<button class="provider-btn provider-btn-secondary provider-btn-sm" onClick=${onSaveMetadata}>${t("common:actions.save")}</button>
 			</div>
 		</div>
-		${
-			group.models.length === 0
-				? html`<div class="mt-2 text-xs text-[var(--muted)]">${t("providers:noActiveModels")}</div>`
-				: html`<div class="mt-2 flex flex-col gap-2">
-					${group.models.map(
-						(model) => html`<div key=${model.id} class="flex items-start justify-between gap-3 py-1">
-							<div class="min-w-0 flex-1">
-								<div class="flex items-center gap-2 min-w-0">
-									<div class="text-sm font-medium text-[var(--text-strong)] truncate">${model.displayName || model.id}</div>
-									${model.unsupported ? html`<span class="provider-item-badge warning" title=${model.unsupportedReason || t("providers:modelNotSupported")}>${t("providers:unsupported")}</span>` : null}
-									${model.supportsTools ? null : html`<span class="provider-item-badge warning">${t("providers:chatOnly")}</span>`}
-									${model.disabled ? html`<span class="provider-item-badge muted">${t("providers:disabled")}</span>` : null}
-								</div>
-								<div class="mt-1 text-xs text-[var(--muted)] font-mono opacity-75">${model.id}</div>
-								${model.createdAt ? html`<time class="mt-0.5 text-xs text-[var(--muted)] opacity-60 block" data-epoch-ms=${model.createdAt * 1000} data-format="year-month"></time>` : null}
-							</div>
-							<button class="provider-btn provider-btn-secondary provider-btn-sm" onClick=${() => onToggleModel(model)}>
-								${model.disabled ? t("common:actions.enable") : t("common:actions.disable")}
-							</button>
-						</div>`,
-					)}
-				</div>`
-		}
 	</div>`;
 }
 
