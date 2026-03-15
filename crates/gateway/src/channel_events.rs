@@ -132,6 +132,7 @@ impl GatewayChannelEventSink {
 impl ChannelEventSink for GatewayChannelEventSink {
     async fn emit(&self, event: ChannelEvent) {
         if let Some(state) = self.state.get() {
+            #[cfg_attr(not(feature = "whatsapp"), allow(unused_mut))]
             let mut payload = match serde_json::to_value(&event) {
                 Ok(v) => v,
                 Err(e) => {
@@ -155,10 +156,15 @@ impl ChannelEventSink for GatewayChannelEventSink {
                 }
             }
 
-            broadcast(state, "channel", payload, BroadcastOpts {
-                drop_if_slow: true,
-                ..Default::default()
-            })
+            broadcast(
+                state,
+                "channel",
+                payload,
+                BroadcastOpts {
+                    drop_if_slow: true,
+                    ..Default::default()
+                },
+            )
             .await;
         }
     }
@@ -200,10 +206,15 @@ impl ChannelEventSink for GatewayChannelEventSink {
                 "channel": &meta,
                 "sessionKey": &session_key,
             });
-            broadcast(state, "chat", payload, BroadcastOpts {
-                drop_if_slow: true,
-                ..Default::default()
-            })
+            broadcast(
+                state,
+                "chat",
+                payload,
+                BroadcastOpts {
+                    drop_if_slow: true,
+                    ..Default::default()
+                },
+            )
             .await;
 
             // Persist channel binding so web UI messages on this session
@@ -448,10 +459,15 @@ impl ChannelEventSink for GatewayChannelEventSink {
                     return;
                 },
             };
-            broadcast(state, "channel", payload, BroadcastOpts {
-                drop_if_slow: true,
-                ..Default::default()
-            })
+            broadcast(
+                state,
+                "channel",
+                payload,
+                BroadcastOpts {
+                    drop_if_slow: true,
+                    ..Default::default()
+                },
+            )
             .await;
         } else {
             warn!("request_disable_account: gateway not ready");
@@ -760,10 +776,15 @@ impl ChannelEventSink for GatewayChannelEventSink {
             "sessionKey": &session_key,
             "hasAttachments": true,
         });
-        broadcast(state, "chat", payload, BroadcastOpts {
-            drop_if_slow: true,
-            ..Default::default()
-        })
+        broadcast(
+            state,
+            "chat",
+            payload,
+            BroadcastOpts {
+                drop_if_slow: true,
+                ..Default::default()
+            },
+        )
         .await;
 
         // Persist channel binding (ensure session row exists first —

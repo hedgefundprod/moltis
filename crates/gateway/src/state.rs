@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet},
     sync::{
         Arc,
         atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -569,7 +569,12 @@ impl GatewayState {
 
     /// Register a new client connection.
     pub async fn register_client(&self, client: ConnectedClient) {
+        #[cfg(feature = "metrics")]
         let count = self.inner.write().await.register_client(client);
+        #[cfg(not(feature = "metrics"))]
+        {
+            self.inner.write().await.register_client(client);
+        }
 
         #[cfg(feature = "metrics")]
         moltis_metrics::gauge!(moltis_metrics::system::CONNECTED_CLIENTS).set(count as f64);
@@ -778,13 +783,14 @@ impl GatewayState {
                     "client not connected",
                 ));
             }
-            inner
-                .pending_client_requests
-                .insert(request_id.clone(), PendingClientRequest {
+            inner.pending_client_requests.insert(
+                request_id.clone(),
+                PendingClientRequest {
                     method: method.into(),
                     sender: tx,
                     created_at: Instant::now(),
-                });
+                },
+            );
             let sent = inner
                 .clients
                 .get(conn_id)

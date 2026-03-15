@@ -6,7 +6,10 @@
 
 use std::path::PathBuf;
 
-use {async_trait::async_trait, serde_json::Value, tracing::debug};
+use {async_trait::async_trait, serde_json::Value};
+
+#[cfg(feature = "trusted-network")]
+use tracing::debug;
 
 // Re-export types from the trusted-network crate so existing gateway code
 // doesn't need to add a direct dependency when the feature is on.
