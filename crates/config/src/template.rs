@@ -88,6 +88,9 @@ auto_generate = true              # Auto-generate local CA and server certificat
 #   base_url  - Override API endpoint
 #   models    - Preferred models shown first (optional)
 #   fetch_models - Discover models from provider API when available (default: true)
+#   fetch_runtime_metadata - Query provider runtime metadata for context limits (default: true)
+#   model_overrides.<model_id>.context_window - Manual context window override for one model
+#   model_overrides.<model_id>.max_output_tokens - Manual max output token override for one model
 #   stream_transport - Streaming transport: "sse", "websocket", or "auto" (default: "sse")
 #   alias     - Custom name for metrics labels (useful for multiple instances)
 
@@ -105,6 +108,10 @@ offered = ["local-llm", "github-copilot", "openai-codex", "openai", "anthropic",
 # api_key = "sk-ant-..."                      # Or set ANTHROPIC_API_KEY env var
 # models = ["claude-sonnet-4-5-20250929"]     # Optional preferred models
 # fetch_models = true                          # Set false to skip remote discovery
+# fetch_runtime_metadata = true               # Set false to use only static model limits
+# [providers.openai.model_overrides."gpt-5.2"]
+# context_window = 400000
+# max_output_tokens = 32000
 # base_url = "https://api.anthropic.com"     # API endpoint
 # alias = "anthropic"                         # Custom name for metrics
 
@@ -365,7 +372,7 @@ deny = []                         # Tools to always deny (e.g., ["browser"])
 
 [tools.web.search]
 enabled = true                    # Enable web search tool
-provider = "brave"                # Search provider: "brave" or "perplexity"
+provider = "brave"                # Search provider: "brave", "perplexity", or "searxng"
 max_results = 5                   # Number of results to return (1-10)
 timeout_seconds = 30              # HTTP request timeout
 cache_ttl_minutes = 15            # Cache results for this many minutes (0 = no cache)
@@ -377,6 +384,10 @@ duckduckgo_fallback = false       # Off by default; enable only if you want DDG 
 # api_key = "..."                 # Or set PERPLEXITY_API_KEY env var
 # base_url = "..."                # API base URL (auto-detected from key prefix)
 # model = "sonar"                 # Perplexity model to use
+
+# SearXNG-specific settings (when provider = "searxng")
+[tools.web.search.searxng]
+base_url = "http://localhost:8080" # Base URL of your SearXNG instance
 
 # ── Web Fetch ─────────────────────────────────────────────────────────────────
 
@@ -560,6 +571,9 @@ reset_on_exit = true              # Reset serve/funnel when gateway shuts down
 # Configure the embedding provider for memory/RAG features.
 
 [memory]
+# backend = "builtin"            # Memory backend: "builtin", "qmd", or "lancedb"
+# [memory.lancedb]
+# path = "memory/lancedb"         # Embedded LanceDB directory root (default: <data_dir>/memory/lancedb)
 # provider = "local"              # Embedding provider:
                                   #   "local"   - Built-in local embeddings
                                   #   "ollama"  - Ollama server

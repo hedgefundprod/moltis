@@ -103,7 +103,7 @@ Configure the built-in `web_search` tool:
 ```toml
 [tools.web.search]
 enabled = true
-provider = "brave"               # "brave" or "perplexity"
+provider = "brave"               # "brave", "perplexity", or "searxng"
 max_results = 5                  # 1-10
 timeout_seconds = 30
 cache_ttl_minutes = 15
@@ -114,11 +114,16 @@ duckduckgo_fallback = false      # Default: do not use DuckDuckGo fallback
 # api_key = "..."                # Or use PERPLEXITY_API_KEY / OPENROUTER_API_KEY
 # base_url = "..."               # Optional override
 # model = "perplexity/sonar-pro" # Optional override
+
+[tools.web.search.searxng]
+base_url = "http://localhost:8080" # Base URL of your SearXNG instance
 ```
 
 If no search API key is configured:
 
-- with `duckduckgo_fallback = false` (default), Moltis returns a clear hint to set `BRAVE_API_KEY` or `PERPLEXITY_API_KEY`
+- with `provider = "brave"` and `duckduckgo_fallback = false` (default), Moltis returns a clear hint to set `BRAVE_API_KEY`
+- with `provider = "perplexity"` and `duckduckgo_fallback = false`, Moltis returns a clear hint to set `PERPLEXITY_API_KEY`
+- with `provider = "searxng"`, Moltis queries your configured SearXNG instance directly and does not require an API key
 - with `duckduckgo_fallback = true`, Moltis attempts DuckDuckGo HTML search, which may hit CAPTCHA/rate limits
 
 ## Chat Message Queue
@@ -141,12 +146,15 @@ Long-term memory uses embeddings for semantic search:
 
 ```toml
 [memory]
-backend = "builtin"             # Or "qmd"
+backend = "builtin"             # Or "qmd" or "lancedb"
 provider = "openai"             # Or "local", "ollama", "custom"
 model = "text-embedding-3-small"
 citations = "auto"              # "on", "off", or "auto"
 llm_reranking = false
 session_export = false
+
+[memory.lancedb]
+path = "memory/lancedb"         # Optional embedded LanceDB directory root
 ```
 
 ## Authentication

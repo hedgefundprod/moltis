@@ -26,7 +26,7 @@ struct CacheEntry {
     expires_at: Instant,
 }
 
-/// Web search tool — lets the LLM search the web via Brave Search or Perplexity.
+/// Web search tool — lets the LLM search the web via Brave Search, Perplexity, or SearXNG.
 ///
 /// When the configured provider's API key is missing and fallback is enabled,
 /// the tool falls back to DuckDuckGo HTML search.
@@ -54,6 +54,9 @@ enum SearchProvider {
     Perplexity {
         base_url_override: Option<String>,
         model: String,
+    },
+    Searxng {
+        base_url: String,
     },
 }
 
@@ -167,6 +170,18 @@ impl WebSearchTool {
                     config.duckduckgo_fallback,
                 ))
             },
+            ConfigSearchProvider::Searxng => {
+                let base_url = env_value_with_overrides(env_overrides, "SEARXNG_BASE_URL")
+                    .unwrap_or_else(|| config.searxng.base_url.clone());
+                Some(Self::new(
+                    SearchProvider::Searxng { base_url },
+                    Secret::new(String::new()),
+                    config.max_results,
+                    Duration::from_secs(config.timeout_seconds),
+                    Duration::from_secs(config.cache_ttl_minutes * 60),
+                    config.duckduckgo_fallback,
+                ))
+            },
         }
     }
 
@@ -233,6 +248,7 @@ impl WebSearchTool {
         match &self.provider {
             SearchProvider::Brave => &["BRAVE_API_KEY"],
             SearchProvider::Perplexity { .. } => &["PERPLEXITY_API_KEY", "OPENROUTER_API_KEY"],
+            SearchProvider::Searxng { .. } => &[],
         }
     }
 
@@ -277,10 +293,13 @@ impl WebSearchTool {
                 let now = Instant::now();
                 cache.retain(|_, e| e.expires_at > now);
             }
-            cache.insert(key, CacheEntry {
-                value,
-                expires_at: Instant::now() + self.cache_ttl,
-            });
+            cache.insert(
+                key,
+                CacheEntry {
+                    value,
+                    expires_at: Instant::now() + self.cache_ttl,
+                },
+            );
         }
     }
 
@@ -409,6 +428,69 @@ impl WebSearchTool {
         }))
     }
 
+    async fn search_searxng(
+        &self,
+        query: &str,
+        count: u8,
+        params: &serde_json::Value,
+        accept_language: Option<&str>,
+        base_url: &str,
+    ) -> crate::Result<serde_json::Value> {
+        let base_url = base_url.trim_end_matches('/');
+        let mut url = format!(
+            "{base_url}/search?q={}&format=json",
+            urlencoding::encode(query)
+        );
+
+        if let Some(lang) = params
+            .get("search_lang")
+            .and_then(|v| v.as_str())
+            .or_else(|| params.get("ui_lang").and_then(|v| v.as_str()))
+        {
+            url.push_str(&format!("&language={}", urlencoding::encode(lang)));
+        }
+        if let Some(country) = params.get("country").and_then(|v| v.as_str()) {
+            url.push_str(&format!("&country={}", urlencoding::encode(country)));
+        }
+        if let Some(freshness) = params.get("freshness").and_then(|v| v.as_str()) {
+            url.push_str(&format!("&time_range={}", urlencoding::encode(freshness)));
+        }
+
+        let client = crate::shared_http_client();
+        let mut req = client
+            .get(&url)
+            .timeout(self.timeout)
+            .header("Accept", "application/json");
+        if let Some(lang) = accept_language {
+            req = req.header("Accept-Language", lang);
+        }
+        let resp = req.send().await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(Error::message(format!("SearXNG returned {status}: {body}")));
+        }
+
+        let body_text = resp.text().await.map_err(|error| {
+            Error::message(format!("failed to read SearXNG response body: {error}"))
+        })?;
+        let body: serde_json::Value = serde_json::from_str(&body_text).map_err(|error| {
+            let snippet: String = body_text.chars().take(400).collect();
+            Error::message(format!(
+                "failed to parse SearXNG JSON body: {error}; body starts with: {snippet}"
+            ))
+        })?;
+        let mut results = parse_searxng_results(&body);
+        results.truncate(count as usize);
+
+        Ok(serde_json::json!({
+            "provider": "searxng",
+            "query": query,
+            "results": results,
+        }))
+    }
+
     /// Check whether DuckDuckGo is temporarily blocked due to a prior CAPTCHA.
     fn is_ddg_blocked(&self) -> bool {
         self.ddg_blocked_until
@@ -514,6 +596,44 @@ fn parse_brave_results(body: &serde_json::Value) -> Vec<BraveResult> {
                     }
                     let description = result
                         .get("description")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+
+                    Some(BraveResult {
+                        title: title.to_string(),
+                        url: url.to_string(),
+                        description,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_searxng_results(body: &serde_json::Value) -> Vec<BraveResult> {
+    body.get("results")
+        .and_then(serde_json::Value::as_array)
+        .map(|results| {
+            results
+                .iter()
+                .filter_map(|result| {
+                    let title = result
+                        .get("title")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::trim)
+                        .unwrap_or("");
+                    let url = result
+                        .get("url")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::trim)
+                        .unwrap_or("");
+                    if title.is_empty() || url.is_empty() {
+                        return None;
+                    }
+                    let description = result
+                        .get("content")
+                        .or_else(|| result.get("description"))
                         .and_then(serde_json::Value::as_str)
                         .unwrap_or("")
                         .to_string();
@@ -757,6 +877,10 @@ impl AgentTool for WebSearchTool {
                     self.search_perplexity(query, &api_key, &base_url, model)
                         .await?
                 },
+                SearchProvider::Searxng { base_url } => {
+                    self.search_searxng(query, count, &params, accept_language, base_url)
+                        .await?
+                },
             }
         };
 
@@ -768,7 +892,11 @@ impl AgentTool for WebSearchTool {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 #[cfg(test)]
 mod tests {
-    use {super::*, std::sync::Arc};
+    use {
+        super::*,
+        mockito::Server,
+        std::sync::Arc,
+    };
 
     struct MockEnvProvider {
         vars: Vec<(String, String)>,
@@ -944,6 +1072,88 @@ mod tests {
     fn test_resolve_perplexity_base_url_respects_override() {
         let url = resolve_perplexity_base_url(Some("https://custom.example"), "pplx-abc123");
         assert_eq!(url, "https://custom.example");
+    }
+
+    #[test]
+    fn test_parse_searxng_results() {
+        let json = serde_json::json!({
+            "results": [
+                {"title": "Rust", "url": "https://rust-lang.org", "content": "A language"},
+                {"title": "Missing URL", "content": "ignored"}
+            ]
+        });
+        let results = parse_searxng_results(&json);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Rust");
+        assert_eq!(results[0].url, "https://rust-lang.org");
+        assert_eq!(results[0].description, "A language");
+    }
+
+    #[test]
+    fn test_from_config_searxng_without_api_key() {
+        let cfg = WebSearchConfig {
+            provider: ConfigSearchProvider::Searxng,
+            ..Default::default()
+        };
+        let tool =
+            WebSearchTool::from_config(&cfg).expect("searxng should register without API key");
+        assert!(matches!(tool.provider, SearchProvider::Searxng { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_search_searxng_live_http_path() {
+        let mut server = Server::new_async().await;
+        let _mock = server
+            .mock("GET", "/search")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("q".into(), "rust programming".into()),
+                mockito::Matcher::UrlEncoded("format".into(), "json".into()),
+                mockito::Matcher::UrlEncoded("language".into(), "en-US".into()),
+                mockito::Matcher::UrlEncoded("country".into(), "US".into()),
+                mockito::Matcher::UrlEncoded("time_range".into(), "pm".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                serde_json::json!({
+                    "results": [
+                        {
+                            "title": "Rust Programming Language",
+                            "url": "https://www.rust-lang.org/",
+                            "content": "A language empowering everyone to build reliable and efficient software."
+                        }
+                    ]
+                })
+                .to_string(),
+            )
+            .create_async()
+            .await;
+
+        let tool = WebSearchTool::new(
+            SearchProvider::Searxng {
+                base_url: server.url(),
+            },
+            Secret::new(String::new()),
+            5,
+            Duration::from_secs(10),
+            Duration::from_secs(60),
+            false,
+        );
+
+        let result = tool
+            .execute(serde_json::json!({
+                "query": "rust programming",
+                "count": 5,
+                "search_lang": "en-US",
+                "country": "US",
+                "freshness": "pm"
+            }))
+            .await
+            .unwrap();
+
+        assert_eq!(result["provider"], "searxng");
+        assert_eq!(result["results"].as_array().unwrap().len(), 1);
+        assert_eq!(result["results"][0]["url"], "https://www.rust-lang.org/");
     }
 
     #[tokio::test]
