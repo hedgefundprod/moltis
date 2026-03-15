@@ -5722,16 +5722,19 @@ mod tests {
                 ]
             }]"#,
         );
-        assert_eq!(mounts, vec![
-            ContainerMount {
-                source: PathBuf::from("/host/data"),
-                destination: PathBuf::from("/home/moltis/.moltis"),
-            },
-            ContainerMount {
-                source: PathBuf::from("/host/config"),
-                destination: PathBuf::from("/home/moltis/.config/moltis"),
-            },
-        ]);
+        assert_eq!(
+            mounts,
+            vec![
+                ContainerMount {
+                    source: PathBuf::from("/host/data"),
+                    destination: PathBuf::from("/home/moltis/.moltis"),
+                },
+                ContainerMount {
+                    source: PathBuf::from("/host/config"),
+                    destination: PathBuf::from("/home/moltis/.config/moltis"),
+                },
+            ]
+        );
     }
 
     #[test]
@@ -5760,15 +5763,20 @@ mod tests {
     fn test_detect_host_data_dir_with_references_uses_mount_overrides() {
         clear_host_data_dir_test_state();
         let guest_data_dir = PathBuf::from("/home/moltis/.moltis");
-        set_test_container_mount_override("docker", "parent-container", vec![ContainerMount {
-            source: PathBuf::from("/srv/moltis/data"),
-            destination: guest_data_dir.clone(),
-        }]);
+        set_test_container_mount_override(
+            "docker",
+            "parent-container",
+            vec![ContainerMount {
+                source: PathBuf::from("/srv/moltis/data"),
+                destination: guest_data_dir.clone(),
+            }],
+        );
 
-        let detected =
-            detect_host_data_dir_with_references("docker", &guest_data_dir, &[String::from(
-                "parent-container",
-            )]);
+        let detected = detect_host_data_dir_with_references(
+            "docker",
+            &guest_data_dir,
+            &[String::from("parent-container")],
+        );
 
         assert_eq!(detected, Some(PathBuf::from("/srv/moltis/data")));
     }
@@ -5788,10 +5796,14 @@ mod tests {
 
         let reference = String::from("retry-container");
 
-        set_test_container_mount_override("docker", &reference, vec![ContainerMount {
-            source: PathBuf::from("/srv/moltis/data"),
-            destination: guest_data_dir.clone(),
-        }]);
+        set_test_container_mount_override(
+            "docker",
+            &reference,
+            vec![ContainerMount {
+                source: PathBuf::from("/srv/moltis/data"),
+                destination: guest_data_dir.clone(),
+            }],
+        );
 
         let detected =
             detect_host_data_dir_with_references("docker", &guest_data_dir, &[reference]);
@@ -6015,14 +6027,10 @@ mod tests {
         };
         let docker = DockerSandbox::new(config);
         let args = docker.resource_args();
-        assert_eq!(args, vec![
-            "--memory",
-            "256M",
-            "--cpus",
-            "0.5",
-            "--pids-limit",
-            "50"
-        ]);
+        assert_eq!(
+            args,
+            vec!["--memory", "256M", "--cpus", "0.5", "--pids-limit", "50"]
+        );
     }
 
     #[test]
@@ -7232,28 +7240,30 @@ mod tests {
 
     #[test]
     fn test_host_package_name_candidates_t64_to_base() {
-        assert_eq!(host_package_name_candidates("libgtk-3-0t64"), vec![
-            "libgtk-3-0t64".to_string(),
-            "libgtk-3-0".to_string()
-        ]);
+        assert_eq!(
+            host_package_name_candidates("libgtk-3-0t64"),
+            vec!["libgtk-3-0t64".to_string(), "libgtk-3-0".to_string()]
+        );
     }
 
     #[test]
     fn test_host_package_name_candidates_base_to_t64_for_soname() {
-        assert_eq!(host_package_name_candidates("libcups2"), vec![
-            "libcups2".to_string(),
-            "libcups2t64".to_string()
-        ]);
+        assert_eq!(
+            host_package_name_candidates("libcups2"),
+            vec!["libcups2".to_string(), "libcups2t64".to_string()]
+        );
     }
 
     #[test]
     fn test_host_package_name_candidates_non_library_stays_single() {
-        assert_eq!(host_package_name_candidates("curl"), vec![
-            "curl".to_string()
-        ]);
-        assert_eq!(host_package_name_candidates("libreoffice-core"), vec![
-            "libreoffice-core".to_string()
-        ]);
+        assert_eq!(
+            host_package_name_candidates("curl"),
+            vec!["curl".to_string()]
+        );
+        assert_eq!(
+            host_package_name_candidates("libreoffice-core"),
+            vec!["libreoffice-core".to_string()]
+        );
     }
 
     #[tokio::test]

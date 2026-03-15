@@ -483,32 +483,44 @@ fn usage_object_from_payload(payload: &serde_json::Value) -> Option<&serde_json:
 #[must_use]
 pub fn parse_openai_compat_usage(usage: &serde_json::Value) -> Usage {
     Usage {
-        input_tokens: usage_field_u32(usage, &[
-            &["prompt_tokens"],
-            &["promptTokens"],
-            &["input_tokens"],
-            &["inputTokens"],
-        ]),
-        output_tokens: usage_field_u32(usage, &[
-            &["completion_tokens"],
-            &["completionTokens"],
-            &["output_tokens"],
-            &["outputTokens"],
-        ]),
-        cache_read_tokens: usage_field_u32(usage, &[
-            &["prompt_tokens_details", "cached_tokens"],
-            &["promptTokensDetails", "cachedTokens"],
-            &["cache_read_input_tokens"],
-            &["cacheReadInputTokens"],
-            &["input_tokens_details", "cache_read_input_tokens"],
-            &["inputTokensDetails", "cacheReadInputTokens"],
-        ]),
-        cache_write_tokens: usage_field_u32(usage, &[
-            &["cache_creation_input_tokens"],
-            &["cacheCreationInputTokens"],
-            &["input_tokens_details", "cache_creation_input_tokens"],
-            &["inputTokensDetails", "cacheCreationInputTokens"],
-        ]),
+        input_tokens: usage_field_u32(
+            usage,
+            &[
+                &["prompt_tokens"],
+                &["promptTokens"],
+                &["input_tokens"],
+                &["inputTokens"],
+            ],
+        ),
+        output_tokens: usage_field_u32(
+            usage,
+            &[
+                &["completion_tokens"],
+                &["completionTokens"],
+                &["output_tokens"],
+                &["outputTokens"],
+            ],
+        ),
+        cache_read_tokens: usage_field_u32(
+            usage,
+            &[
+                &["prompt_tokens_details", "cached_tokens"],
+                &["promptTokensDetails", "cachedTokens"],
+                &["cache_read_input_tokens"],
+                &["cacheReadInputTokens"],
+                &["input_tokens_details", "cache_read_input_tokens"],
+                &["inputTokensDetails", "cacheReadInputTokens"],
+            ],
+        ),
+        cache_write_tokens: usage_field_u32(
+            usage,
+            &[
+                &["cache_creation_input_tokens"],
+                &["cacheCreationInputTokens"],
+                &["input_tokens_details", "cache_creation_input_tokens"],
+                &["inputTokensDetails", "cacheCreationInputTokens"],
+            ],
+        ),
     }
 }
 
@@ -1603,9 +1615,10 @@ mod tests {
 
         let events = finalize_stream(&mut state);
         assert_eq!(events.len(), 2);
-        assert!(matches!(&events[0], StreamEvent::ToolCallComplete {
-            index: 0
-        }));
+        assert!(matches!(
+            &events[0],
+            StreamEvent::ToolCallComplete { index: 0 }
+        ));
         assert!(matches!(
             &events[1],
             StreamEvent::Done(usage) if usage.input_tokens == 10 && usage.output_tokens == 5
@@ -2474,9 +2487,10 @@ mod tests {
         match result {
             SseLineResult::Events(events) => {
                 assert_eq!(events.len(), 1);
-                assert!(matches!(&events[0], StreamEvent::ToolCallComplete {
-                    index: 0
-                }));
+                assert!(matches!(
+                    &events[0],
+                    StreamEvent::ToolCallComplete { index: 0 }
+                ));
             },
             _ => panic!("Expected Events"),
         }
@@ -2565,9 +2579,10 @@ mod tests {
         let events = finalize_responses_stream(&mut state);
         // Should emit ToolCallComplete for index 1 (pending) + Done
         assert_eq!(events.len(), 2);
-        assert!(matches!(&events[0], StreamEvent::ToolCallComplete {
-            index: 1
-        }));
+        assert!(matches!(
+            &events[0],
+            StreamEvent::ToolCallComplete { index: 1 }
+        ));
         assert!(matches!(
             &events[1],
             StreamEvent::Done(usage) if usage.input_tokens == 30 && usage.output_tokens == 10

@@ -771,10 +771,13 @@ mod tests {
 
         let mut accounts = registry.all_accounts();
         accounts.sort();
-        assert_eq!(accounts, vec![
-            ("discord".into(), "dc1".into()),
-            ("telegram".into(), "tg1".into()),
-        ]);
+        assert_eq!(
+            accounts,
+            vec![
+                ("discord".into(), "dc1".into()),
+                ("telegram".into(), "tg1".into()),
+            ]
+        );
     }
 
     #[tokio::test]

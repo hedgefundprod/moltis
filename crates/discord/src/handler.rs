@@ -464,14 +464,18 @@ impl EventHandler for Handler {
         )
         .increment(1);
 
-        sink.dispatch_to_chat(&text, reply_to, ChannelMessageMeta {
-            channel_type: ChannelType::Discord,
-            sender_name,
-            username,
-            message_kind: Some(inferred_kind),
-            model: config.model.clone(),
-            audio_filename: None,
-        })
+        sink.dispatch_to_chat(
+            &text,
+            reply_to,
+            ChannelMessageMeta {
+                channel_type: ChannelType::Discord,
+                sender_name,
+                username,
+                message_kind: Some(inferred_kind),
+                model: config.model.clone(),
+                audio_filename: None,
+            },
+        )
         .await;
     }
 

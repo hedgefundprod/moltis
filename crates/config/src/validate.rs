@@ -117,10 +117,13 @@ fn build_schema_map() -> KnownKeys {
             ("models", Leaf),
             ("fetch_models", Leaf),
             ("fetch_runtime_metadata", Leaf),
-            ("model_overrides", Map(Box::new(Struct(HashMap::from([
-                ("context_window", Leaf),
-                ("max_output_tokens", Leaf),
-            ]))))),
+            (
+                "model_overrides",
+                Map(Box::new(Struct(HashMap::from([
+                    ("context_window", Leaf),
+                    ("max_output_tokens", Leaf),
+                ])))),
+            ),
             ("stream_transport", Leaf),
             ("alias", Leaf),
             ("tool_mode", Leaf),
@@ -364,10 +367,13 @@ fn build_schema_map() -> KnownKeys {
                 ("shiki_cdn_url", Leaf),
             ])),
         ),
-        ("providers", MapWithFields {
-            value: Box::new(provider_entry()),
-            fields: HashMap::from([("offered", Array(Box::new(Leaf)))]),
-        }),
+        (
+            "providers",
+            MapWithFields {
+                value: Box::new(provider_entry()),
+                fields: HashMap::from([("offered", Array(Box::new(Leaf)))]),
+            },
+        ),
         (
             "chat",
             Struct(HashMap::from([
@@ -399,18 +405,21 @@ fn build_schema_map() -> KnownKeys {
                 Map(Box::new(mcp_server_entry())),
             )])),
         ),
-        ("channels", MapWithFields {
-            // Dynamic keys: extra channel types via #[serde(flatten)]
-            value: Box::new(Map(Box::new(Leaf))),
-            fields: HashMap::from([
-                ("offered", Array(Box::new(Leaf))),
-                ("telegram", Map(Box::new(Leaf))),
-                ("whatsapp", Map(Box::new(Leaf))),
-                ("msteams", Map(Box::new(Leaf))),
-                ("discord", Map(Box::new(Leaf))),
-                ("slack", Map(Box::new(Leaf))),
-            ]),
-        }),
+        (
+            "channels",
+            MapWithFields {
+                // Dynamic keys: extra channel types via #[serde(flatten)]
+                value: Box::new(Map(Box::new(Leaf))),
+                fields: HashMap::from([
+                    ("offered", Array(Box::new(Leaf))),
+                    ("telegram", Map(Box::new(Leaf))),
+                    ("whatsapp", Map(Box::new(Leaf))),
+                    ("msteams", Map(Box::new(Leaf))),
+                    ("discord", Map(Box::new(Leaf))),
+                    ("slack", Map(Box::new(Leaf))),
+                ]),
+            },
+        ),
         (
             "tls",
             Struct(HashMap::from([

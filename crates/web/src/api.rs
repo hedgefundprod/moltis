@@ -80,7 +80,6 @@ fn shared_home_config_payload(config: &moltis_config::MoltisConfig) -> serde_jso
     })
 }
 
-
 #[derive(serde::Deserialize)]
 pub struct ProviderMetadataOverrideRequest {
     context_window: Option<u32>,
@@ -878,8 +877,8 @@ pub async fn api_set_shared_home_handler(
     }
 }
 
-
 pub async fn api_set_provider_metadata_handler(
+    State(state): State<AppState>,
     Json(body): Json<ProviderMetadataUpdateRequest>,
 ) -> impl IntoResponse {
     let provider = body.provider.trim();
@@ -892,7 +891,11 @@ pub async fn api_set_provider_metadata_handler(
     }
 
     let update_result = moltis_config::update_config(|cfg| {
-        let entry = cfg.providers.providers.entry(provider.to_string()).or_default();
+        let entry = cfg
+            .providers
+            .providers
+            .entry(provider.to_string())
+            .or_default();
         if let Some(fetch_runtime_metadata) = body.fetch_runtime_metadata {
             entry.fetch_runtime_metadata = fetch_runtime_metadata;
         }
@@ -904,8 +907,8 @@ pub async fn api_set_provider_metadata_handler(
                 if model.is_empty() {
                     return None;
                 }
-                let has_values =
-                    override_req.context_window.is_some() || override_req.max_output_tokens.is_some();
+                let has_values = override_req.context_window.is_some()
+                    || override_req.max_output_tokens.is_some();
                 if !has_values {
                     return None;
                 }
@@ -921,11 +924,16 @@ pub async fn api_set_provider_metadata_handler(
     });
 
     match update_result {
-        Ok(saved_path) => Json(serde_json::json!({
-            "ok": true,
-            "config_path": saved_path.display().to_string(),
-        }))
-        .into_response(),
+        Ok(saved_path) => {
+            if let Err(err) = state.gateway.services.provider_setup.reload_config().await {
+                warn!(error = %err, "failed to reload provider setup config after metadata save");
+            }
+            Json(serde_json::json!({
+                "ok": true,
+                "config_path": saved_path.display().to_string(),
+            }))
+            .into_response()
+        },
         Err(e) => api_error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             PROVIDER_METADATA_SAVE_FAILED,

@@ -501,15 +501,20 @@ mod tests {
             model: Some("default-model".into()),
             ..Default::default()
         };
-        cfg.channel_overrides
-            .insert("C123".into(), ChannelOverride {
+        cfg.channel_overrides.insert(
+            "C123".into(),
+            ChannelOverride {
                 model: Some("channel-model".into()),
                 ..Default::default()
-            });
-        cfg.user_overrides.insert("U456".into(), UserOverride {
-            model: Some("user-model".into()),
-            ..Default::default()
-        });
+            },
+        );
+        cfg.user_overrides.insert(
+            "U456".into(),
+            UserOverride {
+                model: Some("user-model".into()),
+                ..Default::default()
+            },
+        );
 
         // User override wins
         assert_eq!(cfg.resolve_model("C123", "U456"), Some("user-model"));

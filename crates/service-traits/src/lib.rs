@@ -1023,6 +1023,8 @@ impl LogsService for NoopLogsService {
 #[async_trait]
 pub trait ProviderSetupService: Send + Sync {
     async fn available(&self) -> ServiceResult;
+    /// Reload provider config from disk and refresh any derived runtime state.
+    async fn reload_config(&self) -> ServiceResult;
     async fn save_key(&self, params: Value) -> ServiceResult;
     async fn oauth_start(&self, params: Value) -> ServiceResult;
     async fn oauth_complete(&self, params: Value) -> ServiceResult;
@@ -1045,6 +1047,10 @@ pub struct NoopProviderSetupService;
 impl ProviderSetupService for NoopProviderSetupService {
     async fn available(&self) -> ServiceResult {
         Ok(serde_json::json!([]))
+    }
+
+    async fn reload_config(&self) -> ServiceResult {
+        Ok(serde_json::json!({ "ok": true }))
     }
 
     async fn save_key(&self, _p: Value) -> ServiceResult {

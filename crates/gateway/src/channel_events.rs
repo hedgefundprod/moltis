@@ -155,10 +155,15 @@ impl ChannelEventSink for GatewayChannelEventSink {
                 }
             }
 
-            broadcast(state, "channel", payload, BroadcastOpts {
-                drop_if_slow: true,
-                ..Default::default()
-            })
+            broadcast(
+                state,
+                "channel",
+                payload,
+                BroadcastOpts {
+                    drop_if_slow: true,
+                    ..Default::default()
+                },
+            )
             .await;
         }
     }
@@ -200,10 +205,15 @@ impl ChannelEventSink for GatewayChannelEventSink {
                 "channel": &meta,
                 "sessionKey": &session_key,
             });
-            broadcast(state, "chat", payload, BroadcastOpts {
-                drop_if_slow: true,
-                ..Default::default()
-            })
+            broadcast(
+                state,
+                "chat",
+                payload,
+                BroadcastOpts {
+                    drop_if_slow: true,
+                    ..Default::default()
+                },
+            )
             .await;
 
             // Persist channel binding so web UI messages on this session
@@ -448,10 +458,15 @@ impl ChannelEventSink for GatewayChannelEventSink {
                     return;
                 },
             };
-            broadcast(state, "channel", payload, BroadcastOpts {
-                drop_if_slow: true,
-                ..Default::default()
-            })
+            broadcast(
+                state,
+                "channel",
+                payload,
+                BroadcastOpts {
+                    drop_if_slow: true,
+                    ..Default::default()
+                },
+            )
             .await;
         } else {
             warn!("request_disable_account: gateway not ready");
@@ -760,10 +775,15 @@ impl ChannelEventSink for GatewayChannelEventSink {
             "sessionKey": &session_key,
             "hasAttachments": true,
         });
-        broadcast(state, "chat", payload, BroadcastOpts {
-            drop_if_slow: true,
-            ..Default::default()
-        })
+        broadcast(
+            state,
+            "chat",
+            payload,
+            BroadcastOpts {
+                drop_if_slow: true,
+                ..Default::default()
+            },
+        )
         .await;
 
         // Persist channel binding (ensure session row exists first —

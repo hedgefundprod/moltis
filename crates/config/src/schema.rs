@@ -1800,26 +1800,41 @@ pub struct WasmToolLimitsConfig {
 fn default_wasm_tool_overrides() -> HashMap<String, ToolLimitOverrideConfig> {
     let mb = 1024_u64 * 1024_u64;
     HashMap::from([
-        ("calc".to_string(), ToolLimitOverrideConfig {
-            fuel: Some(100_000),
-            memory: Some(2 * mb),
-        }),
-        ("web_fetch".to_string(), ToolLimitOverrideConfig {
-            fuel: Some(10_000_000),
-            memory: Some(32 * mb),
-        }),
-        ("web_search".to_string(), ToolLimitOverrideConfig {
-            fuel: Some(10_000_000),
-            memory: Some(32 * mb),
-        }),
-        ("show_map".to_string(), ToolLimitOverrideConfig {
-            fuel: Some(10_000_000),
-            memory: Some(64 * mb),
-        }),
-        ("location".to_string(), ToolLimitOverrideConfig {
-            fuel: Some(5_000_000),
-            memory: Some(16 * mb),
-        }),
+        (
+            "calc".to_string(),
+            ToolLimitOverrideConfig {
+                fuel: Some(100_000),
+                memory: Some(2 * mb),
+            },
+        ),
+        (
+            "web_fetch".to_string(),
+            ToolLimitOverrideConfig {
+                fuel: Some(10_000_000),
+                memory: Some(32 * mb),
+            },
+        ),
+        (
+            "web_search".to_string(),
+            ToolLimitOverrideConfig {
+                fuel: Some(10_000_000),
+                memory: Some(32 * mb),
+            },
+        ),
+        (
+            "show_map".to_string(),
+            ToolLimitOverrideConfig {
+                fuel: Some(10_000_000),
+                memory: Some(64 * mb),
+            },
+        ),
+        (
+            "location".to_string(),
+            ToolLimitOverrideConfig {
+                fuel: Some(5_000_000),
+                memory: Some(16 * mb),
+            },
+        ),
     ])
 }
 
@@ -2490,10 +2505,13 @@ deny = ["exec"]
     #[test]
     fn providers_config_local_alias_maps_local_llm_to_local() {
         let mut config = ProvidersConfig::default();
-        config.providers.insert("local-llm".into(), ProviderEntry {
-            enabled: false,
-            ..ProviderEntry::default()
-        });
+        config.providers.insert(
+            "local-llm".into(),
+            ProviderEntry {
+                enabled: false,
+                ..ProviderEntry::default()
+            },
+        );
 
         assert!(!config.is_enabled("local"));
         assert!(!config.is_enabled("local-llm"));
@@ -2503,14 +2521,20 @@ deny = ["exec"]
     #[test]
     fn providers_config_local_alias_prefers_exact_key() {
         let mut config = ProvidersConfig::default();
-        config.providers.insert("local".into(), ProviderEntry {
-            enabled: false,
-            ..ProviderEntry::default()
-        });
-        config.providers.insert("local-llm".into(), ProviderEntry {
-            enabled: true,
-            ..ProviderEntry::default()
-        });
+        config.providers.insert(
+            "local".into(),
+            ProviderEntry {
+                enabled: false,
+                ..ProviderEntry::default()
+            },
+        );
+        config.providers.insert(
+            "local-llm".into(),
+            ProviderEntry {
+                enabled: true,
+                ..ProviderEntry::default()
+            },
+        );
 
         assert!(!config.is_enabled("local"));
         assert!(config.is_enabled("local-llm"));
@@ -2542,10 +2566,13 @@ deny = ["exec"]
             offered: vec!["openai".into()],
             ..ProvidersConfig::default()
         };
-        config.providers.insert("openai".into(), ProviderEntry {
-            enabled: false,
-            ..ProviderEntry::default()
-        });
+        config.providers.insert(
+            "openai".into(),
+            ProviderEntry {
+                enabled: false,
+                ..ProviderEntry::default()
+            },
+        );
         assert!(!config.is_enabled("openai"));
     }
 
@@ -2559,31 +2586,37 @@ deny = ["exec"]
     #[test]
     fn channels_config_defaults_to_telegram_discord_slack_offered() {
         let config = ChannelsConfig::default();
-        assert_eq!(config.offered, vec![
-            "telegram".to_string(),
-            "discord".to_string(),
-            "slack".to_string(),
-        ]);
+        assert_eq!(
+            config.offered,
+            vec![
+                "telegram".to_string(),
+                "discord".to_string(),
+                "slack".to_string(),
+            ]
+        );
     }
 
     #[test]
     fn channels_config_empty_toml_defaults_offered() {
         let config: ChannelsConfig = toml::from_str("").unwrap();
-        assert_eq!(config.offered, vec![
-            "telegram".to_string(),
-            "discord".to_string(),
-            "slack".to_string(),
-        ]);
+        assert_eq!(
+            config.offered,
+            vec![
+                "telegram".to_string(),
+                "discord".to_string(),
+                "slack".to_string(),
+            ]
+        );
     }
 
     #[test]
     fn channels_config_explicit_offered() {
         let config: ChannelsConfig =
             toml::from_str(r#"offered = ["telegram", "msteams"]"#).unwrap();
-        assert_eq!(config.offered, vec![
-            "telegram".to_string(),
-            "msteams".to_string()
-        ]);
+        assert_eq!(
+            config.offered,
+            vec!["telegram".to_string(), "msteams".to_string()]
+        );
     }
 
     #[test]

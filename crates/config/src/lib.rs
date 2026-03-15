@@ -41,9 +41,8 @@ pub use {
         AgentIdentity, AgentPreset, AgentsConfig, AuthConfig, CalDavAccountConfig, CalDavConfig,
         ChatConfig, GeoLocation, MemoryScope, MessageQueueMode, MoltisConfig, PresetMemoryConfig,
         PresetToolPolicy, ProviderModelOverride, ResolvedIdentity, SessionAccessPolicyConfig,
-        Timezone, ToolMode, UserProfile, VoiceConfig, VoiceElevenLabsConfig,
-        VoiceOpenAiConfig, VoiceSttConfig, VoiceSttProvider, VoiceTtsConfig,
-        VoiceWhisperConfig,
+        Timezone, ToolMode, UserProfile, VoiceConfig, VoiceElevenLabsConfig, VoiceOpenAiConfig,
+        VoiceSttConfig, VoiceSttProvider, VoiceTtsConfig, VoiceWhisperConfig,
     },
     validate::{Diagnostic, Severity, ValidationResult},
 };

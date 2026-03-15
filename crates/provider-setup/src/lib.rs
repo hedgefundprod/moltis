@@ -229,12 +229,15 @@ impl KeyStore {
             return old_format
                 .into_iter()
                 .map(|(k, v)| {
-                    (k, ProviderConfig {
-                        api_key: Some(v),
-                        base_url: None,
-                        models: Vec::new(),
-                        display_name: None,
-                    })
+                    (
+                        k,
+                        ProviderConfig {
+                            api_key: Some(v),
+                            base_url: None,
+                            models: Vec::new(),
+                            display_name: None,
+                        },
+                    )
                 })
                 .collect();
         }
@@ -1388,6 +1391,26 @@ impl LiveProviderSetupService {
             .clone()
     }
 
+    async fn reload_config_from_disk(&self) -> ServiceResult {
+        let providers = moltis_config::discover_and_load().providers;
+        {
+            let mut cfg = self.config.lock().unwrap_or_else(|e| e.into_inner());
+            *cfg = providers;
+        }
+        let effective = self.effective_config();
+        let new_registry = self.build_registry(&effective);
+        let provider_summary = new_registry.provider_summary();
+        let model_count = new_registry.list_models().len();
+        let mut reg = self.registry.write().await;
+        *reg = new_registry;
+        info!(
+            provider_summary = %provider_summary,
+            models = model_count,
+            "provider setup config reloaded from disk"
+        );
+        Ok(serde_json::json!({ "ok": true }))
+    }
+
     fn set_provider_enabled_in_memory(&self, provider: &str, enabled: bool) {
         let mut cfg = self.config.lock().unwrap_or_else(|e| e.into_inner());
         cfg.providers
@@ -1738,21 +1761,23 @@ impl ProviderSetupService for LiveProviderSetupService {
             let model = models.first().cloned();
 
             let config_entry = active_config.get(&name);
-            let model_overrides = config_entry.map(|entry| {
-                entry
-                    .model_overrides
-                    .iter()
-                    .map(|(model, override_cfg)| {
-                        (
-                            model.clone(),
-                            serde_json::json!({
-                                "contextWindow": override_cfg.context_window,
-                                "maxOutputTokens": override_cfg.max_output_tokens,
-                            }),
-                        )
-                    })
-                    .collect::<Map<String, Value>>()
-            }).unwrap_or_default();
+            let model_overrides = config_entry
+                .map(|entry| {
+                    entry
+                        .model_overrides
+                        .iter()
+                        .map(|(model, override_cfg)| {
+                            (
+                                model.clone(),
+                                serde_json::json!({
+                                    "contextWindow": override_cfg.context_window,
+                                    "maxOutputTokens": override_cfg.max_output_tokens,
+                                }),
+                            )
+                        })
+                        .collect::<Map<String, Value>>()
+                })
+                .unwrap_or_default();
             providers.push((
                 None,
                 known_count, // sort after all known providers
@@ -1815,6 +1840,10 @@ impl ProviderSetupService for LiveProviderSetupService {
             .collect();
 
         Ok(Value::Array(providers))
+    }
+
+    async fn reload_config(&self) -> ServiceResult {
+        self.reload_config_from_disk().await
     }
 
     async fn save_key(&self, params: Value) -> ServiceResult {
@@ -3230,9 +3259,11 @@ mod tests {
         let mut handles = Vec::new();
         for (provider, key, models) in [
             ("openai", "sk-openai", vec!["gpt-5".to_string()]),
-            ("anthropic", "sk-anthropic", vec![
-                "claude-sonnet-4".to_string(),
-            ]),
+            (
+                "anthropic",
+                "sk-anthropic",
+                vec!["claude-sonnet-4".to_string()],
+            ),
         ] {
             let store = store.clone();
             handles.push(std::thread::spawn(move || {
@@ -3360,12 +3391,13 @@ mod tests {
             .expect("openai-codex should exist");
 
         let mut config = ProvidersConfig::default();
-        config
-            .providers
-            .insert("openai-codex".into(), ProviderEntry {
+        config.providers.insert(
+            "openai-codex".into(),
+            ProviderEntry {
                 enabled: false,
                 ..Default::default()
-            });
+            },
+        );
 
         assert!(!svc.is_provider_configured(&provider, &config));
     }
@@ -3392,10 +3424,13 @@ mod tests {
         store.save("anthropic", "sk-saved").unwrap();
 
         let mut base = ProvidersConfig::default();
-        base.providers.insert("anthropic".into(), ProviderEntry {
-            api_key: Some(Secret::new("sk-config".into())),
-            ..Default::default()
-        });
+        base.providers.insert(
+            "anthropic".into(),
+            ProviderEntry {
+                api_key: Some(Secret::new("sk-config".into())),
+                ..Default::default()
+            },
+        );
         let merged = config_with_saved_keys(&base, &store, &[]);
         let entry = merged.get("anthropic").unwrap();
         // Config key takes precedence over saved key.
@@ -3563,10 +3598,13 @@ mod tests {
             offered: vec!["openai".into()],
             ..ProvidersConfig::default()
         };
-        config.providers.insert("anthropic".into(), ProviderEntry {
-            api_key: Some(Secret::new("sk-test".into())),
-            ..Default::default()
-        });
+        config.providers.insert(
+            "anthropic".into(),
+            ProviderEntry {
+                api_key: Some(Secret::new("sk-test".into())),
+                ..Default::default()
+            },
+        );
         let svc = LiveProviderSetupService::new(registry, config, None);
         let result = svc.available().await.unwrap();
         let arr = result
@@ -3594,13 +3632,16 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let token_store = TokenStore::with_path(dir.path().join("oauth_tokens.json"));
         token_store
-            .save("openai-codex", &OAuthTokens {
-                access_token: Secret::new("token".to_string()),
-                refresh_token: None,
-                id_token: None,
-                account_id: None,
-                expires_at: None,
-            })
+            .save(
+                "openai-codex",
+                &OAuthTokens {
+                    access_token: Secret::new("token".to_string()),
+                    refresh_token: None,
+                    id_token: None,
+                    account_id: None,
+                    expires_at: None,
+                },
+            )
             .expect("save oauth token");
 
         let key_store = KeyStore::with_path(dir.path().join("provider_keys.json"));
@@ -3659,12 +3700,13 @@ mod tests {
             offered: vec!["openai".into()],
             ..ProvidersConfig::default()
         };
-        config
-            .providers
-            .insert("custom-openrouter-ai".into(), ProviderEntry {
+        config.providers.insert(
+            "custom-openrouter-ai".into(),
+            ProviderEntry {
                 enabled: true,
                 ..Default::default()
-            });
+            },
+        );
 
         let registry = Arc::new(RwLock::new(ProviderRegistry::from_env_with_config(
             &ProvidersConfig::default(),
@@ -3973,13 +4015,16 @@ mod tests {
             Some(&home)
         ));
 
-        home.save("github-copilot", &OAuthTokens {
-            access_token: Secret::new("home-token".to_string()),
-            refresh_token: None,
-            id_token: None,
-            account_id: None,
-            expires_at: None,
-        })
+        home.save(
+            "github-copilot",
+            &OAuthTokens {
+                access_token: Secret::new("home-token".to_string()),
+                refresh_token: None,
+                id_token: None,
+                account_id: None,
+                expires_at: None,
+            },
+        )
         .expect("save home token");
 
         assert!(has_oauth_tokens_for_provider(
@@ -4176,17 +4221,23 @@ mod tests {
         let mut empty = ProvidersConfig::default();
         assert!(!has_explicit_provider_settings(&empty));
 
-        empty.providers.insert("openai".into(), ProviderEntry {
-            api_key: Some(Secret::new("sk-test".into())),
-            ..Default::default()
-        });
+        empty.providers.insert(
+            "openai".into(),
+            ProviderEntry {
+                api_key: Some(Secret::new("sk-test".into())),
+                ..Default::default()
+            },
+        );
         assert!(has_explicit_provider_settings(&empty));
 
         let mut model_only = ProvidersConfig::default();
-        model_only.providers.insert("ollama".into(), ProviderEntry {
-            models: vec!["llama3".into()],
-            ..Default::default()
-        });
+        model_only.providers.insert(
+            "ollama".into(),
+            ProviderEntry {
+                models: vec!["llama3".into()],
+                ..Default::default()
+            },
+        );
         assert!(has_explicit_provider_settings(&model_only));
     }
 
@@ -4559,18 +4610,27 @@ mod tests {
     #[test]
     fn existing_custom_provider_for_base_url_prefers_canonical_name() {
         let mut existing = HashMap::new();
-        existing.insert("custom-openrouter-ai".into(), ProviderConfig {
-            base_url: Some("https://openrouter.ai/api/v1".into()),
-            ..Default::default()
-        });
-        existing.insert("custom-openrouter-ai-2".into(), ProviderConfig {
-            base_url: Some("https://OPENROUTER.ai/api/v1/".into()),
-            ..Default::default()
-        });
-        existing.insert("custom-together-ai".into(), ProviderConfig {
-            base_url: Some("https://api.together.ai/v1".into()),
-            ..Default::default()
-        });
+        existing.insert(
+            "custom-openrouter-ai".into(),
+            ProviderConfig {
+                base_url: Some("https://openrouter.ai/api/v1".into()),
+                ..Default::default()
+            },
+        );
+        existing.insert(
+            "custom-openrouter-ai-2".into(),
+            ProviderConfig {
+                base_url: Some("https://OPENROUTER.ai/api/v1/".into()),
+                ..Default::default()
+            },
+        );
+        existing.insert(
+            "custom-together-ai".into(),
+            ProviderConfig {
+                base_url: Some("https://api.together.ai/v1".into()),
+                ..Default::default()
+            },
+        );
 
         assert_eq!(
             existing_custom_provider_for_base_url("https://openrouter.ai/api/v1", &existing),
