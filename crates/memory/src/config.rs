@@ -58,6 +58,8 @@ impl fmt::Display for MergeStrategy {
 /// Configuration for the memory subsystem.
 #[derive(Debug, Clone)]
 pub struct MemoryConfig {
+    /// Memory backend identifier: "builtin", "qmd", or "lancedb".
+    pub backend: String,
     /// Path to the SQLite database file (or `:memory:` for tests).
     pub db_path: String,
     /// Root data directory for writing memory files (e.g. `~/.moltis/`).
@@ -91,6 +93,7 @@ pub struct MemoryConfig {
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
+            backend: "builtin".into(),
             db_path: "memory.db".into(),
             data_dir: None,
             memory_dirs: vec![PathBuf::from("memory")],

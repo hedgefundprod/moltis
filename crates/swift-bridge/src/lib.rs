@@ -72,31 +72,14 @@ impl BridgeState {
         let session_store = SessionStore::new(sessions_dir);
 
         // Open the shared SQLite database (same moltis.db used by the gateway).
-        // WAL mode + synchronous=NORMAL avoids multi-second write contention.
-        let db_path = data_dir.join("moltis.db");
         let db_pool = runtime.block_on(async {
-            use {
-                sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous},
-                std::str::FromStr,
-            };
-            let opts = SqliteConnectOptions::from_str(&format!("sqlite:{}", db_path.display()))
-                .expect("invalid moltis.db path")
-                .create_if_missing(true)
-                .journal_mode(SqliteJournalMode::Wal)
-                .synchronous(SqliteSynchronous::Normal);
-            let pool = sqlx::SqlitePool::connect_with(opts)
+            let pool = moltis_gateway::runtime_db::open_sqlite_pool(&data_dir, 5)
                 .await
                 .unwrap_or_else(|e| panic!("failed to open moltis.db: {e}"));
             // Run migrations so the sessions table exists even if the gateway
-            // hasn't been started yet. Order: projects first (FK dependency).
-            if let Err(e) = moltis_projects::run_migrations(&pool).await {
-                emit_log("WARN", "bridge", &format!("projects migration: {e}"));
-            }
-            if let Err(e) = moltis_sessions::run_migrations(&pool).await {
-                emit_log("WARN", "bridge", &format!("sessions migration: {e}"));
-            }
-            if let Err(e) = moltis_gateway::run_migrations(&pool).await {
-                emit_log("WARN", "bridge", &format!("gateway migration: {e}"));
+            // hasn't been started yet. Order matches the shared gateway runtime path.
+            if let Err(e) = moltis_gateway::runtime_db::migrate_sqlite_pool(&pool).await {
+                emit_log("WARN", "bridge", &format!("shared db migration: {e}"));
             }
             pool
         });
@@ -2299,7 +2282,7 @@ pub extern "C" fn moltis_memory_status() -> *mut c_char {
             .unwrap_or_else(|| "none".to_owned());
         let has_embeddings = !config.memory.disable_rag;
 
-        let db_path = moltis_config::data_dir().join("memory.db");
+        let db_path = moltis_memory::runtime::default_db_path(&moltis_config::data_dir());
         let db_size = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
 
         if !db_path.exists() {

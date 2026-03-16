@@ -13,8 +13,8 @@ pub enum DbAction {
 /// Returns the paths to the database files.
 fn db_paths() -> (PathBuf, PathBuf) {
     let data_dir = moltis_config::data_dir();
-    let main_db = data_dir.join("moltis.db");
-    let memory_db = data_dir.join("memory.db");
+    let main_db = moltis_gateway::runtime_db::default_db_path(&data_dir);
+    let memory_db = moltis_memory::runtime::default_db_path(&data_dir);
     (main_db, memory_db)
 }
 
@@ -141,29 +141,12 @@ async fn run_migrations() -> anyhow::Result<()> {
 
     // Run main database migrations
     println!("Running migrations for main database...");
-    let db_url = format!("sqlite:{}?mode=rwc", main_db.display());
-    let pool = sqlx::SqlitePool::connect(&db_url).await?;
+    let pool = moltis_gateway::runtime_db::open_sqlite_pool(&moltis_config::data_dir(), 1).await?;
 
-    // Run migrations in dependency order (same as server.rs)
-    moltis_projects::run_migrations(&pool)
+    moltis_gateway::runtime_db::migrate_sqlite_pool(&pool)
         .await
-        .map_err(|e| anyhow::anyhow!("projects migrations failed: {e}"))?;
-    println!("  - projects migrations complete");
-
-    moltis_sessions::run_migrations(&pool)
-        .await
-        .map_err(|e| anyhow::anyhow!("sessions migrations failed: {e}"))?;
-    println!("  - sessions migrations complete");
-
-    moltis_cron::run_migrations(&pool)
-        .await
-        .map_err(|e| anyhow::anyhow!("cron migrations failed: {e}"))?;
-    println!("  - cron migrations complete");
-
-    moltis_gateway::run_migrations(&pool)
-        .await
-        .map_err(|e| anyhow::anyhow!("gateway migrations failed: {e}"))?;
-    println!("  - gateway migrations complete");
+        .map_err(|e| anyhow::anyhow!("main database migrations failed: {e}"))?;
+    println!("  - shared main database migrations complete");
 
     pool.close().await;
 
@@ -253,14 +236,8 @@ mod tests {
         let memory_db = temp.path().join("memory.db");
 
         // Run main database migrations
-        let db_url = format!("sqlite:{}?mode=rwc", main_db.display());
-        let pool = sqlx::SqlitePool::connect(&db_url).await.unwrap();
-
-        // Run migrations in dependency order
-        moltis_projects::run_migrations(&pool).await.unwrap();
-        moltis_sessions::run_migrations(&pool).await.unwrap();
-        moltis_cron::run_migrations(&pool).await.unwrap();
-        moltis_gateway::run_migrations(&pool).await.unwrap();
+        let pool = moltis_gateway::runtime_db::open_sqlite_pool(temp.path(), 4).await.unwrap();
+        moltis_gateway::runtime_db::migrate_sqlite_pool(&pool).await.unwrap();
 
         // Verify tables were created by querying them
         let _: (i64,) = sqlx::query_as("SELECT count(*) FROM projects")
@@ -312,22 +289,14 @@ mod tests {
     #[tokio::test]
     async fn test_migrations_are_idempotent() {
         let temp = TempDir::new().unwrap();
-        let main_db = temp.path().join("moltis.db");
 
-        let db_url = format!("sqlite:{}?mode=rwc", main_db.display());
-        let pool = sqlx::SqlitePool::connect(&db_url).await.unwrap();
+        let pool = moltis_gateway::runtime_db::open_sqlite_pool(temp.path(), 4).await.unwrap();
 
         // Run all migrations
-        moltis_projects::run_migrations(&pool).await.unwrap();
-        moltis_sessions::run_migrations(&pool).await.unwrap();
-        moltis_cron::run_migrations(&pool).await.unwrap();
-        moltis_gateway::run_migrations(&pool).await.unwrap();
+        moltis_gateway::runtime_db::migrate_sqlite_pool(&pool).await.unwrap();
 
         // Run again - should still work due to set_ignore_missing
-        moltis_projects::run_migrations(&pool).await.unwrap();
-        moltis_sessions::run_migrations(&pool).await.unwrap();
-        moltis_cron::run_migrations(&pool).await.unwrap();
-        moltis_gateway::run_migrations(&pool).await.unwrap();
+        moltis_gateway::runtime_db::migrate_sqlite_pool(&pool).await.unwrap();
 
         pool.close().await;
     }

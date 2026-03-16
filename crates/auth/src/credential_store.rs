@@ -606,6 +606,8 @@ impl CredentialStore {
 
         let mut result = Vec::with_capacity(rows.len());
         for (key, value, encrypted) in rows {
+            #[cfg(not(feature = "vault"))]
+            let _ = encrypted;
             #[cfg(feature = "vault")]
             let plaintext = {
                 if encrypted != 0 {

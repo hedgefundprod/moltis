@@ -1,16 +1,16 @@
 use std::{
-    collections::HashMap,
     path::{Component, Path, PathBuf},
     sync::Arc,
-    time::Duration,
 };
+
+#[cfg(feature = "voice")]
+use std::{collections::HashMap, time::Duration};
 
 use tracing::warn;
 
-use {
-    moltis_config::VoiceSttProvider,
-    moltis_protocol::{ErrorShape, error_codes},
-};
+#[cfg(feature = "voice")]
+use moltis_config::VoiceSttProvider;
+use moltis_protocol::{ErrorShape, error_codes};
 
 use crate::broadcast::{BroadcastOpts, broadcast};
 

@@ -1071,7 +1071,7 @@ impl Default for TailscaleConfig {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MemoryEmbeddingConfig {
-    /// Memory backend: "builtin" (default) or "qmd" for QMD sidecar.
+    /// Memory backend: "builtin" (default), "qmd" for QMD sidecar, or "lancedb" for embedded LanceDB-backed vector search.
     pub backend: Option<String>,
     /// Embedding provider: "local", "ollama", "openai", "custom", or None for auto-detect.
     #[serde(alias = "embedding_provider")]
@@ -1107,6 +1107,9 @@ pub struct MemoryEmbeddingConfig {
     /// QMD-specific configuration (only used when backend = "qmd").
     #[serde(default)]
     pub qmd: QmdConfig,
+    /// LanceDB-specific configuration (only used when backend = "lancedb").
+    #[serde(default)]
+    pub lancedb: LanceDbConfig,
 }
 
 /// QMD backend configuration.
@@ -1135,7 +1138,6 @@ pub struct QmdCollection {
     #[serde(default)]
     pub globs: Vec<String>,
 }
-
 /// Hooks configuration section (shell hooks defined in config file).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct HooksConfig {
@@ -1537,6 +1539,7 @@ pub enum SearchProvider {
     #[default]
     Brave,
     Perplexity,
+    Searxng,
 }
 
 /// Web search tool configuration.
@@ -1564,6 +1567,8 @@ pub struct WebSearchConfig {
     pub duckduckgo_fallback: bool,
     /// Perplexity-specific settings.
     pub perplexity: PerplexityConfig,
+    /// SearXNG-specific settings.
+    pub searxng: SearxngConfig,
 }
 
 impl Default for WebSearchConfig {
@@ -1577,6 +1582,7 @@ impl Default for WebSearchConfig {
             cache_ttl_minutes: 15,
             duckduckgo_fallback: false,
             perplexity: PerplexityConfig::default(),
+            searxng: SearxngConfig::default(),
         }
     }
 }
@@ -1596,6 +1602,22 @@ pub struct PerplexityConfig {
     pub base_url: Option<String>,
     /// Model to use.
     pub model: Option<String>,
+}
+
+/// SearXNG search provider configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SearxngConfig {
+    /// Base URL for the SearXNG instance (default: http://localhost:8080).
+    pub base_url: String,
+}
+
+impl Default for SearxngConfig {
+    fn default() -> Self {
+        Self {
+            base_url: "http://localhost:8080".into(),
+        }
+    }
 }
 
 /// Web fetch tool configuration.
@@ -1800,26 +1822,41 @@ pub struct WasmToolLimitsConfig {
 fn default_wasm_tool_overrides() -> HashMap<String, ToolLimitOverrideConfig> {
     let mb = 1024_u64 * 1024_u64;
     HashMap::from([
-        ("calc".to_string(), ToolLimitOverrideConfig {
-            fuel: Some(100_000),
-            memory: Some(2 * mb),
-        }),
-        ("web_fetch".to_string(), ToolLimitOverrideConfig {
-            fuel: Some(10_000_000),
-            memory: Some(32 * mb),
-        }),
-        ("web_search".to_string(), ToolLimitOverrideConfig {
-            fuel: Some(10_000_000),
-            memory: Some(32 * mb),
-        }),
-        ("show_map".to_string(), ToolLimitOverrideConfig {
-            fuel: Some(10_000_000),
-            memory: Some(64 * mb),
-        }),
-        ("location".to_string(), ToolLimitOverrideConfig {
-            fuel: Some(5_000_000),
-            memory: Some(16 * mb),
-        }),
+        (
+            "calc".to_string(),
+            ToolLimitOverrideConfig {
+                fuel: Some(100_000),
+                memory: Some(2 * mb),
+            },
+        ),
+        (
+            "web_fetch".to_string(),
+            ToolLimitOverrideConfig {
+                fuel: Some(10_000_000),
+                memory: Some(32 * mb),
+            },
+        ),
+        (
+            "web_search".to_string(),
+            ToolLimitOverrideConfig {
+                fuel: Some(10_000_000),
+                memory: Some(32 * mb),
+            },
+        ),
+        (
+            "show_map".to_string(),
+            ToolLimitOverrideConfig {
+                fuel: Some(10_000_000),
+                memory: Some(64 * mb),
+            },
+        ),
+        (
+            "location".to_string(),
+            ToolLimitOverrideConfig {
+                fuel: Some(5_000_000),
+                memory: Some(16 * mb),
+            },
+        ),
     ])
 }
 
@@ -2490,10 +2527,13 @@ deny = ["exec"]
     #[test]
     fn providers_config_local_alias_maps_local_llm_to_local() {
         let mut config = ProvidersConfig::default();
-        config.providers.insert("local-llm".into(), ProviderEntry {
-            enabled: false,
-            ..ProviderEntry::default()
-        });
+        config.providers.insert(
+            "local-llm".into(),
+            ProviderEntry {
+                enabled: false,
+                ..ProviderEntry::default()
+            },
+        );
 
         assert!(!config.is_enabled("local"));
         assert!(!config.is_enabled("local-llm"));
@@ -2503,14 +2543,20 @@ deny = ["exec"]
     #[test]
     fn providers_config_local_alias_prefers_exact_key() {
         let mut config = ProvidersConfig::default();
-        config.providers.insert("local".into(), ProviderEntry {
-            enabled: false,
-            ..ProviderEntry::default()
-        });
-        config.providers.insert("local-llm".into(), ProviderEntry {
-            enabled: true,
-            ..ProviderEntry::default()
-        });
+        config.providers.insert(
+            "local".into(),
+            ProviderEntry {
+                enabled: false,
+                ..ProviderEntry::default()
+            },
+        );
+        config.providers.insert(
+            "local-llm".into(),
+            ProviderEntry {
+                enabled: true,
+                ..ProviderEntry::default()
+            },
+        );
 
         assert!(!config.is_enabled("local"));
         assert!(config.is_enabled("local-llm"));
@@ -2542,10 +2588,13 @@ deny = ["exec"]
             offered: vec!["openai".into()],
             ..ProvidersConfig::default()
         };
-        config.providers.insert("openai".into(), ProviderEntry {
-            enabled: false,
-            ..ProviderEntry::default()
-        });
+        config.providers.insert(
+            "openai".into(),
+            ProviderEntry {
+                enabled: false,
+                ..ProviderEntry::default()
+            },
+        );
         assert!(!config.is_enabled("openai"));
     }
 
@@ -2559,31 +2608,37 @@ deny = ["exec"]
     #[test]
     fn channels_config_defaults_to_telegram_discord_slack_offered() {
         let config = ChannelsConfig::default();
-        assert_eq!(config.offered, vec![
-            "telegram".to_string(),
-            "discord".to_string(),
-            "slack".to_string(),
-        ]);
+        assert_eq!(
+            config.offered,
+            vec![
+                "telegram".to_string(),
+                "discord".to_string(),
+                "slack".to_string(),
+            ]
+        );
     }
 
     #[test]
     fn channels_config_empty_toml_defaults_offered() {
         let config: ChannelsConfig = toml::from_str("").unwrap();
-        assert_eq!(config.offered, vec![
-            "telegram".to_string(),
-            "discord".to_string(),
-            "slack".to_string(),
-        ]);
+        assert_eq!(
+            config.offered,
+            vec![
+                "telegram".to_string(),
+                "discord".to_string(),
+                "slack".to_string(),
+            ]
+        );
     }
 
     #[test]
     fn channels_config_explicit_offered() {
         let config: ChannelsConfig =
             toml::from_str(r#"offered = ["telegram", "msteams"]"#).unwrap();
-        assert_eq!(config.offered, vec![
-            "telegram".to_string(),
-            "msteams".to_string()
-        ]);
+        assert_eq!(
+            config.offered,
+            vec!["telegram".to_string(), "msteams".to_string()]
+        );
     }
 
     #[test]
@@ -2806,4 +2861,12 @@ tool_mode = "native"
             ToolMode::Native
         );
     }
+}
+
+/// LanceDB backend configuration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LanceDbConfig {
+    /// Optional path to the LanceDB directory root. Defaults to <data_dir>/memory/lancedb
+    pub path: Option<String>,
 }

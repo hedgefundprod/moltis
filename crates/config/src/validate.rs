@@ -178,6 +178,8 @@ fn build_schema_map() -> KnownKeys {
         ]))
     };
 
+    let searxng = || Struct(HashMap::from([("base_url", Leaf)]));
+
     let web_search = || {
         Struct(HashMap::from([
             ("enabled", Leaf),
@@ -188,6 +190,7 @@ fn build_schema_map() -> KnownKeys {
             ("cache_ttl_minutes", Leaf),
             ("duckduckgo_fallback", Leaf),
             ("perplexity", perplexity()),
+            ("searxng", searxng()),
         ]))
     };
 
@@ -367,10 +370,13 @@ fn build_schema_map() -> KnownKeys {
                 ("shiki_cdn_url", Leaf),
             ])),
         ),
-        ("providers", MapWithFields {
-            value: Box::new(provider_entry()),
-            fields: HashMap::from([("offered", Array(Box::new(Leaf)))]),
-        }),
+        (
+            "providers",
+            MapWithFields {
+                value: Box::new(provider_entry()),
+                fields: HashMap::from([("offered", Array(Box::new(Leaf)))]),
+            },
+        ),
         (
             "chat",
             Struct(HashMap::from([
@@ -402,18 +408,21 @@ fn build_schema_map() -> KnownKeys {
                 Map(Box::new(mcp_server_entry())),
             )])),
         ),
-        ("channels", MapWithFields {
-            // Dynamic keys: extra channel types via #[serde(flatten)]
-            value: Box::new(Map(Box::new(Leaf))),
-            fields: HashMap::from([
-                ("offered", Array(Box::new(Leaf))),
-                ("telegram", Map(Box::new(Leaf))),
-                ("whatsapp", Map(Box::new(Leaf))),
-                ("msteams", Map(Box::new(Leaf))),
-                ("discord", Map(Box::new(Leaf))),
-                ("slack", Map(Box::new(Leaf))),
-            ]),
-        }),
+        (
+            "channels",
+            MapWithFields {
+                // Dynamic keys: extra channel types via #[serde(flatten)]
+                value: Box::new(Map(Box::new(Leaf))),
+                fields: HashMap::from([
+                    ("offered", Array(Box::new(Leaf))),
+                    ("telegram", Map(Box::new(Leaf))),
+                    ("whatsapp", Map(Box::new(Leaf))),
+                    ("msteams", Map(Box::new(Leaf))),
+                    ("discord", Map(Box::new(Leaf))),
+                    ("slack", Map(Box::new(Leaf))),
+                ]),
+            },
+        ),
         (
             "tls",
             Struct(HashMap::from([
@@ -474,6 +483,7 @@ fn build_schema_map() -> KnownKeys {
                 ("search_merge_strategy", Leaf),
                 ("session_export", Leaf),
                 ("qmd", qmd()),
+                ("lancedb", Struct(HashMap::from([("path", Leaf)]))),
             ])),
         ),
         (
@@ -1200,7 +1210,7 @@ fn check_semantic_warnings(config: &MoltisConfig, diagnostics: &mut Vec<Diagnost
 
     // Unknown memory backend
     if let Some(ref backend) = config.memory.backend {
-        let valid_backends = ["builtin", "qmd"];
+        let valid_backends = ["builtin", "qmd", "lancedb"];
         if !valid_backends.contains(&backend.as_str()) {
             diagnostics.push(Diagnostic {
                 severity: Severity::Warning,
@@ -1806,6 +1816,27 @@ backend = "postgres"
         assert!(
             warning.is_some(),
             "expected warning for unknown memory backend"
+        );
+    }
+
+    #[test]
+    fn memory_lancedb_path_is_recognized_in_schema() {
+        let toml = r#"
+[memory]
+backend = "lancedb"
+
+[memory.lancedb]
+path = "memory/lancedb"
+"#;
+        let result = validate_toml_str(toml);
+        let unknown = result
+            .diagnostics
+            .iter()
+            .find(|d| d.category == "unknown-field" && d.path.starts_with("memory.lancedb"));
+        assert!(
+            unknown.is_none(),
+            "memory.lancedb.path should be accepted, got: {:?}",
+            result.diagnostics
         );
     }
 

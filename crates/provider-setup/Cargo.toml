@@ -8,10 +8,12 @@ version.workspace    = true
 async-trait           = { workspace = true }
 moltis-agents         = { workspace = true }
 moltis-config         = { workspace = true }
+moltis-memory         = { workspace = true }
 moltis-oauth          = { workspace = true }
 moltis-providers      = { workspace = true }
 moltis-service-traits = { workspace = true }
 reqwest               = { workspace = true }
+sqlx                  = { workspace = true }
 secrecy               = { workspace = true }
 serde                 = { workspace = true }
 serde_json            = { workspace = true }
@@ -21,6 +23,7 @@ tracing               = { workspace = true }
 url                   = { workspace = true }
 
 [features]
+local-embeddings = ["moltis-memory/local-embeddings"]
 local-llm = []
 
 [dev-dependencies]

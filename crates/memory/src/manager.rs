@@ -480,7 +480,10 @@ fn chrono_now() -> String {
 mod tests {
     use {
         super::*,
-        crate::{schema::run_migrations, store_sqlite::SqliteMemoryStore},
+        crate::{
+            schema::run_migrations, store_lancedb::LanceDbMemoryStore,
+            store_sqlite::SqliteMemoryStore,
+        },
         async_trait::async_trait,
         std::io::Write,
         tempfile::TempDir,
@@ -554,6 +557,37 @@ mod tests {
         (MemoryManager::new(config, store, embedder), tmp)
     }
 
+    async fn setup_lancedb() -> (MemoryManager, TempDir) {
+        let tmp = TempDir::new().unwrap();
+        let mem_dir = tmp.path().join("memory");
+        let lancedb_dir = tmp.path().join("memory").join("lancedb");
+        std::fs::create_dir_all(&mem_dir).unwrap();
+
+        let pool = sqlx::SqlitePool::connect(":memory:").await.unwrap();
+        run_migrations(&pool).await.unwrap();
+
+        let config = MemoryConfig {
+            backend: "lancedb".into(),
+            db_path: ":memory:".into(),
+            memory_dirs: vec![mem_dir],
+            chunk_size: 50,
+            chunk_overlap: 10,
+            vector_weight: 0.7,
+            keyword_weight: 0.3,
+            ..Default::default()
+        };
+
+        let sqlite = Box::new(SqliteMemoryStore::new(pool));
+        let store = Box::new(
+            LanceDbMemoryStore::new(&lancedb_dir.to_string_lossy(), sqlite)
+                .await
+                .unwrap(),
+        );
+        let embedder = Box::new(MockEmbedder);
+
+        (MemoryManager::new(config, store, embedder), tmp)
+    }
+
     #[tokio::test]
     async fn test_sync_and_search() {
         let (manager, tmp) = setup().await;
@@ -580,6 +614,36 @@ mod tests {
         assert_eq!(status.total_files, 1);
         assert!(status.total_chunks > 0);
         assert_eq!(status.embedding_model, "mock-model");
+    }
+
+    #[tokio::test]
+    async fn test_sync_and_search_with_lancedb_backend() {
+        let (manager, tmp) = setup_lancedb().await;
+        let mem_dir = tmp.path().join("memory");
+
+        std::fs::write(
+            mem_dir.join("semantic.md"),
+            "Rust memory search uses database-backed chunks and semantic retrieval.",
+        )
+        .unwrap();
+
+        let report = manager.sync().await.unwrap();
+        assert_eq!(report.files_updated, 1);
+
+        let results = manager.search("rust memory", 5).await.unwrap();
+        assert!(
+            !results.is_empty(),
+            "lancedb-backed search should return results"
+        );
+        assert!(
+            results.iter().any(|r| r.path.contains("semantic.md")),
+            "expected results from synced semantic.md, got: {:?}",
+            results.iter().map(|r| r.path.clone()).collect::<Vec<_>>()
+        );
+
+        let status = manager.status().await.unwrap();
+        assert_eq!(status.total_files, 1);
+        assert!(status.total_chunks > 0);
     }
 
     #[tokio::test]

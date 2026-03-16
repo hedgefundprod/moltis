@@ -1,5 +1,7 @@
 use clap::Subcommand;
 
+use moltis_provider_setup::KeyStore;
+
 #[derive(Subcommand)]
 pub enum MemoryAction {
     /// Search memories using keyword (FTS5) search.
@@ -26,27 +28,40 @@ pub async fn handle_memory(action: MemoryAction) -> anyhow::Result<()> {
 
 /// Resolve the memory.db path using the data directory.
 fn memory_db_path() -> std::path::PathBuf {
-    moltis_config::data_dir().join("memory.db")
+    moltis_memory::runtime::default_db_path(&moltis_config::data_dir())
 }
 
 /// Open a read-only SQLite connection pool to memory.db.
 async fn open_memory_pool() -> anyhow::Result<sqlx::SqlitePool> {
-    let db_path = memory_db_path();
-    if !db_path.exists() {
-        anyhow::bail!(
-            "Memory database not found at {}. Start the gateway first to index memories.",
-            db_path.display()
-        );
-    }
-    let db_url = format!("sqlite:{}?mode=ro", db_path.display());
-    let pool = sqlx::SqlitePool::connect(&db_url).await?;
-    Ok(pool)
+    moltis_memory::runtime::open_sqlite_pool(&moltis_config::data_dir(), true).await
+}
+
+fn effective_provider_config(
+    gateway_config: &moltis_config::MoltisConfig,
+) -> moltis_config::schema::ProvidersConfig {
+    let key_store = KeyStore::new();
+    moltis_provider_setup::config_with_saved_keys(&gateway_config.providers, &key_store, &[])
+}
+
+async fn build_memory_manager(
+    gateway_config: &moltis_config::MoltisConfig,
+) -> anyhow::Result<moltis_memory::manager::MemoryManager> {
+    let db_pool = open_memory_pool().await?;
+    let effective_providers = effective_provider_config(gateway_config);
+    Ok(moltis_provider_setup::build_memory_manager_from_pool(
+        gateway_config,
+        &moltis_config::data_dir(),
+        &effective_providers,
+        &std::collections::HashMap::new(),
+        db_pool,
+    )
+    .await)
 }
 
 async fn search_memory(query: &str, limit: usize, json: bool) -> anyhow::Result<()> {
-    let pool = open_memory_pool().await?;
-    let store = moltis_memory::store_sqlite::SqliteMemoryStore::new(pool);
-    let results = moltis_memory::search::keyword_only_search(&store, query, limit).await?;
+    let gateway_config = moltis_config::discover_and_load();
+    let manager = build_memory_manager(&gateway_config).await?;
+    let results = manager.search(query, limit).await?;
 
     if results.is_empty() {
         if json {
@@ -112,22 +127,32 @@ async fn show_status() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    let gateway_config = moltis_config::discover_and_load();
+    let memory_backend = moltis_provider_setup::resolved_memory_backend(&gateway_config);
+    let lancedb_path = moltis_provider_setup::resolved_lancedb_path(
+        &gateway_config,
+        &moltis_config::data_dir(),
+        &memory_backend,
+    );
+
     let pool = open_memory_pool().await?;
     let store = moltis_memory::store_sqlite::SqliteMemoryStore::new(pool);
 
-    let config = moltis_memory::config::MemoryConfig {
-        db_path: db_path.to_string_lossy().to_string(),
-        ..Default::default()
-    };
+    let config =
+        moltis_memory::runtime::build_runtime_config(&moltis_config::data_dir(), memory_backend.clone());
     let manager = moltis_memory::manager::MemoryManager::keyword_only(config, Box::new(store));
     let status = manager.status().await?;
 
     println!("Memory status:");
+    println!("  Backend:         {}", memory_backend);
     println!("  Files:           {}", status.total_files);
     println!("  Chunks:          {}", status.total_chunks);
     println!("  Embedding model: {}", status.embedding_model);
     println!("  Database size:   {}", status.db_size_display());
     println!("  Database path:   {}", db_path.display());
+    if let Some(lancedb_path) = lancedb_path.as_ref() {
+        println!("  LanceDB path:    {}", lancedb_path.display());
+    }
 
     Ok(())
 }
@@ -135,7 +160,22 @@ async fn show_status() -> anyhow::Result<()> {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 #[cfg(test)]
 mod tests {
+    use std::{
+        collections::HashMap,
+        sync::{Mutex, OnceLock},
+    };
+
     use super::*;
+
+    fn test_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
+
+    fn reset_test_dirs(tmp: &tempfile::TempDir) {
+        moltis_config::set_data_dir(tmp.path().to_path_buf());
+        moltis_config::set_config_dir(tmp.path().join("config"));
+    }
 
     #[test]
     fn test_memory_db_path_contains_memory_db() {
@@ -149,9 +189,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_missing_db() {
-        // Point data dir to a temp directory with no memory.db
+        let _guard = test_lock();
+        // Point data/config dir to a temp directory with no memory.db
         let tmp = tempfile::TempDir::new().unwrap();
-        moltis_config::set_data_dir(tmp.path().to_path_buf());
+        reset_test_dirs(&tmp);
 
         let result = search_memory("test", 5, false).await;
         assert!(result.is_err());
@@ -164,6 +205,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_with_results() {
+        let _guard = test_lock();
         let tmp = tempfile::TempDir::new().unwrap();
         let db_path = tmp.path().join("memory.db");
         let db_url = format!("sqlite:{}?mode=rwc", db_path.display());
@@ -202,21 +244,20 @@ mod tests {
 
         pool.close().await;
 
-        // Point data dir to our temp directory
-        moltis_config::set_data_dir(tmp.path().to_path_buf());
+        // Point data/config dir to our temp directory
+        reset_test_dirs(&tmp);
 
-        // Search should find results
-        let pool = open_memory_pool().await.unwrap();
-        let store = moltis_memory::store_sqlite::SqliteMemoryStore::new(pool);
-        let results = moltis_memory::search::keyword_only_search(&store, "rust", 5)
-            .await
-            .unwrap();
+        // Search should find results via the CLI memory manager path
+        let gateway_config = moltis_config::discover_and_load();
+        let manager = build_memory_manager(&gateway_config).await.unwrap();
+        let results = manager.search("rust", 5).await.unwrap();
         assert!(!results.is_empty(), "should find results for 'rust'");
         assert_eq!(results[0].path, "test.md");
     }
 
     #[tokio::test]
     async fn test_search_no_results() {
+        let _guard = test_lock();
         let tmp = tempfile::TempDir::new().unwrap();
         let db_path = tmp.path().join("memory.db");
         let db_url = format!("sqlite:{}?mode=rwc", db_path.display());
@@ -225,18 +266,17 @@ mod tests {
         moltis_memory::schema::run_migrations(&pool).await.unwrap();
         pool.close().await;
 
-        moltis_config::set_data_dir(tmp.path().to_path_buf());
+        reset_test_dirs(&tmp);
 
-        let pool = open_memory_pool().await.unwrap();
-        let store = moltis_memory::store_sqlite::SqliteMemoryStore::new(pool);
-        let results = moltis_memory::search::keyword_only_search(&store, "nonexistent", 5)
-            .await
-            .unwrap();
+        let gateway_config = moltis_config::discover_and_load();
+        let manager = build_memory_manager(&gateway_config).await.unwrap();
+        let results = manager.search("nonexistent", 5).await.unwrap();
         assert!(results.is_empty(), "should find no results");
     }
 
     #[tokio::test]
     async fn test_status_missing_db() {
+        let _guard = test_lock();
         let tmp = tempfile::TempDir::new().unwrap();
         moltis_config::set_data_dir(tmp.path().to_path_buf());
 
@@ -247,6 +287,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_status_with_db() {
+        let _guard = test_lock();
         let tmp = tempfile::TempDir::new().unwrap();
         let db_path = tmp.path().join("memory.db");
         let db_url = format!("sqlite:{}?mode=rwc", db_path.display());
@@ -287,17 +328,91 @@ mod tests {
         moltis_config::set_data_dir(tmp.path().to_path_buf());
 
         // Status should succeed and report 1 file, 1 chunk
-        let ro_pool = open_memory_pool().await.unwrap();
-        let store = moltis_memory::store_sqlite::SqliteMemoryStore::new(ro_pool);
-        let config = moltis_memory::config::MemoryConfig {
-            db_path: db_path.to_string_lossy().to_string(),
-            ..Default::default()
-        };
-        let manager = moltis_memory::manager::MemoryManager::keyword_only(config, Box::new(store));
+        let gateway_config = moltis_config::discover_and_load();
+        let manager = build_memory_manager(&gateway_config).await.unwrap();
         let status = manager.status().await.unwrap();
         assert_eq!(status.total_files, 1);
         assert_eq!(status.total_chunks, 1);
         assert!(status.db_size_bytes > 0);
+    }
+
+    #[tokio::test]
+    async fn test_build_cli_embedder_uses_configured_provider() {
+        let _guard = test_lock();
+        let mut cfg = moltis_config::MoltisConfig::default();
+        cfg.memory.provider = Some("openai".to_string());
+        cfg.memory.api_key = Some(secrecy::Secret::new("test-openai-key".to_string()));
+        cfg.memory.model = Some("text-embedding-3-small".to_string());
+        let effective_providers = effective_provider_config(&cfg);
+        let embedder = moltis_provider_setup::build_memory_embedder(
+            &cfg,
+            &effective_providers,
+            &HashMap::new(),
+        )
+        .await;
+        assert!(
+            embedder.is_some(),
+            "expected configured provider to produce an embedder"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_build_memory_manager_with_lancedb_backend() {
+        let _guard = test_lock();
+        let tmp = tempfile::TempDir::new().unwrap();
+        reset_test_dirs(&tmp);
+
+        let db_path = tmp.path().join("memory.db");
+        let db_url = format!("sqlite:{}?mode=rwc", db_path.display());
+        let pool = sqlx::SqlitePool::connect(&db_url).await.unwrap();
+        moltis_memory::schema::run_migrations(&pool).await.unwrap();
+
+        sqlx::query("INSERT INTO files (path, source, hash, mtime, size) VALUES (?, ?, ?, ?, ?)")
+            .bind("semantic.md")
+            .bind("daily")
+            .bind("hash1")
+            .bind(2000_i64)
+            .bind(100_i64)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "INSERT INTO chunks (id, path, source, start_line, end_line, hash, model, text, embedding, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind("c1")
+        .bind("semantic.md")
+        .bind("daily")
+        .bind(1_i64)
+        .bind(5_i64)
+        .bind("h1")
+        .bind("mock")
+        .bind("rust semantic search")
+        .bind(vec![0u8; 12])
+        .bind("now")
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+
+        let mut cfg = moltis_config::MoltisConfig::default();
+        cfg.memory.backend = Some("lancedb".to_string());
+        cfg.memory.lancedb.path = Some(
+            tmp.path()
+                .join("memory")
+                .join("lancedb")
+                .to_string_lossy()
+                .to_string(),
+        );
+        moltis_config::save_config(&cfg).unwrap();
+
+        let manager = build_memory_manager(&moltis_config::discover_and_load())
+            .await
+            .unwrap();
+        let status = manager.status().await.unwrap();
+        assert_eq!(status.total_files, 1);
+        assert_eq!(status.total_chunks, 1);
     }
 
     #[test]

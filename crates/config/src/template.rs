@@ -377,7 +377,7 @@ deny = []                         # Tools to always deny (e.g., ["browser"])
 
 [tools.web.search]
 enabled = true                    # Enable web search tool
-provider = "brave"                # Search provider: "brave" or "perplexity"
+provider = "brave"                # Search provider: "brave", "perplexity", or "searxng"
 max_results = 5                   # Number of results to return (1-10)
 timeout_seconds = 30              # HTTP request timeout
 cache_ttl_minutes = 15            # Cache results for this many minutes (0 = no cache)
@@ -389,6 +389,10 @@ duckduckgo_fallback = false       # Off by default; enable only if you want DDG 
 # api_key = "..."                 # Or set PERPLEXITY_API_KEY env var
 # base_url = "..."                # API base URL (auto-detected from key prefix)
 # model = "sonar"                 # Perplexity model to use
+
+# SearXNG-specific settings (when provider = "searxng")
+[tools.web.search.searxng]
+base_url = "http://localhost:8080" # Base URL of your SearXNG instance
 
 # ── Web Fetch ─────────────────────────────────────────────────────────────────
 
@@ -572,6 +576,9 @@ reset_on_exit = true              # Reset serve/funnel when gateway shuts down
 # Configure the embedding provider for memory/RAG features.
 
 [memory]
+# backend = "builtin"            # Memory backend: "builtin", "qmd", or "lancedb"
+# [memory.lancedb]
+# path = "memory/lancedb"         # Embedded LanceDB directory root (default: <data_dir>/memory/lancedb)
 # provider = "local"              # Embedding provider:
                                   #   "local"   - Built-in local embeddings
                                   #   "ollama"  - Ollama server

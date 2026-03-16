@@ -203,7 +203,7 @@ fn reset_identity() -> Result<()> {
 
 async fn reset_password() -> Result<()> {
     let data_dir = moltis_config::data_dir();
-    let db_path = data_dir.join("moltis.db");
+    let db_path = moltis_gateway::runtime_db::default_db_path(&data_dir);
     if !db_path.exists() {
         println!("No database found at {}", db_path.display());
         return Ok(());
@@ -225,7 +225,7 @@ fn reset_password_success_lines() -> [&'static str; 2] {
 
 async fn create_api_key(label: &str, scopes_str: Option<String>) -> Result<()> {
     let data_dir = moltis_config::data_dir();
-    let db_path = data_dir.join("moltis.db");
+    let db_path = moltis_gateway::runtime_db::default_db_path(&data_dir);
     if !db_path.exists() {
         anyhow::bail!(
             "No database found at {}. Start the gateway first to initialize it.",
@@ -250,8 +250,7 @@ async fn create_api_key(label: &str, scopes_str: Option<String>) -> Result<()> {
     };
 
     // Connect to database and create the key
-    let db_url = format!("sqlite:{}", db_path.display());
-    let pool = sqlx::SqlitePool::connect(&db_url).await?;
+    let pool = moltis_gateway::runtime_db::open_sqlite_pool(&moltis_config::data_dir(), 1).await?;
     let config = moltis_config::discover_and_load();
     let store = moltis_gateway::auth::CredentialStore::with_config(pool, &config.auth).await?;
 
