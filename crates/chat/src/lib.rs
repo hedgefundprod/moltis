@@ -8644,6 +8644,7 @@ mod tests {
             Ok(moltis_agents::model::ModelMetadata {
                 id: self.id().to_string(),
                 context_length: self.metadata_context_length.unwrap_or(self.context_window),
+                max_output_tokens: None,
             })
         }
 
@@ -10097,7 +10098,21 @@ mod tests {
 
         assert!(result.get("runId").and_then(Value::as_str).is_some());
 
-        let history = store.read(session_key).await.expect("history should load");
+        let history = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let messages = store.read(session_key).await.expect("history should load");
+                let assistant_messages = messages
+                    .iter()
+                    .filter(|msg| msg.get("role").and_then(Value::as_str) == Some("assistant"))
+                    .count();
+                if assistant_messages >= 2 {
+                    break messages;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("assistant reply should be persisted");
         let assistant_messages = history
             .iter()
             .filter(|msg| msg.get("role").and_then(Value::as_str) == Some("assistant"))

@@ -7,7 +7,7 @@ use std::{
     sync::Arc,
 };
 
-use secrecy::Secret;
+use secrecy::{ExposeSecret, Secret};
 
 use {
     axum::{
@@ -62,7 +62,7 @@ use crate::{
     broadcast::{BroadcastOpts, broadcast, broadcast_tick},
     chat::{LiveChatService, LiveModelService},
     methods::MethodRegistry,
-    provider_setup::LiveProviderSetupService,
+    provider_setup::{env_value_with_overrides, LiveProviderSetupService},
     services::GatewayServices,
     session::LiveSessionService,
     state::GatewayState,
@@ -2890,6 +2890,7 @@ pub async fn prepare_gateway(
                     );
 
                     // Initial sync + periodic re-sync (15min with watcher, 5min without).
+                    let watch_dirs = vec![data_dir.join("memory")];
                     let sync_manager = Arc::clone(&manager);
                     tokio::spawn(async move {
                         match sync_manager.sync().await {
@@ -3299,7 +3300,7 @@ pub async fn prepare_gateway(
                 .as_ref()
                 .map(|s| s.expose_secret().clone())
                 .or_else(|| env_value_with_overrides(&runtime_env_overrides, "BRAVE_API_KEY"))
-                .filter(|k| !k.trim().is_empty());
+                .filter(|k: &String| !k.trim().is_empty());
             if let Err(e) = moltis_tools::wasm_tool_runner::register_wasm_tools(
                 &mut tool_registry,
                 &wasm_limits,

@@ -726,6 +726,10 @@ impl moltis_service_traits::ProviderSetupService for MockProviderSetup {
     async fn add_custom(&self, p: Value) -> ServiceResult {
         self.0.call("providers.add_custom", p)
     }
+
+    async fn reload_config(&self) -> ServiceResult {
+        self.0.call("providers.reload_config", json!({}))
+    }
 }
 
 #[async_trait::async_trait]

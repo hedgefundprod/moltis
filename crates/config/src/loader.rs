@@ -1950,18 +1950,18 @@ name = "Rex"
     fn share_dir_data_dir_fallback() {
         let _guard = DATA_DIR_TEST_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().expect("tempdir");
+        let share = dir.path().join("share");
         set_data_dir(dir.path().to_path_buf());
+        set_share_dir(share.clone());
+
+        // With an explicit share_dir override, tests remain isolated from any
+        // host-installed Moltis share directory (for example Homebrew under
+        // /opt/homebrew/Cellar/.../share/moltis).
+        std::fs::create_dir(&share).unwrap();
+        let result = share_dir();
+        assert_eq!(result, Some(share));
+
         clear_share_dir();
-
-        // Without the share/ subdirectory, should not return data_dir/share
-        let result = share_dir();
-        assert_ne!(result, Some(dir.path().join("share")));
-
-        // Create the share/ subdirectory
-        std::fs::create_dir(dir.path().join("share")).unwrap();
-        let result = share_dir();
-        assert_eq!(result, Some(dir.path().join("share")));
-
         clear_data_dir();
     }
 }
